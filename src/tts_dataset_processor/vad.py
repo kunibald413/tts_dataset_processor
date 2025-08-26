@@ -7,44 +7,7 @@ import scipy.io.wavfile as Wavfile
 import numpy as np
 from pydub import AudioSegment
 
-
-def convert_to_16k_mono(input_file: str) -> Tuple[Optional[int], Optional[np.ndarray]]:
-    """
-    Converts an audio file (WAV, MP3, etc.) to 16kHz mono.
-
-    Args:
-        input_file (str): Path to the input audio file.
-
-    Returns:
-        tuple: A tuple containing the 16kHz mono audio data (np.ndarray) and the sample rate (16000).
-    """
-    try:
-        audio = AudioSegment.from_file(input_file)
-        print(f"Original audio: {audio.frame_rate}Hz, {'stereo' if audio.channels > 1 else 'mono'}")
-
-        # Convert to mono if it's stereo
-        if audio.channels > 1:
-            audio = audio.set_channels(1)
-            print("Converted to mono.")
-
-        # Resample to 16kHz if necessary
-        if audio.frame_rate != 16000:
-            audio = audio.set_frame_rate(16000)
-            print("Resampled to 16kHz.")
-
-        # Get audio data as a numpy array
-        data = np.array(audio.get_array_of_samples()).astype(np.int16)
-        sr = 16000
-
-        return sr, data
-
-    except FileNotFoundError:
-        print(f"Error: Input file '{input_file}' not found.")
-        return None, None
-    except Exception as e:
-        print(f"An error occurred during conversion: {e}")
-        print("Please ensure that ffmpeg is installed and in your system's PATH.")
-        return None, None
+from .audio_utils import convert_to_16k_mono
 
 
 def cut_audio_segments(
