@@ -46,8 +46,9 @@ def standardization(audio: Union[str, AudioSegment]) -> AudioData:
         audio_count += 1
     else:
         raise ValueError("Invalid audio type")
-
     # logger.debug("Entering the preprocessing of audio")
+
+    audio: AudioSegment = audio # for clarity
 
     # Convert the audio file to WAV format
     # audio = audio.set_frame_rate(cfg["entrypoint"]["SAMPLE_RATE"])
