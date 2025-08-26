@@ -9,6 +9,12 @@ separator = Separator()
 # Load a machine learning model (if unspecified, defaults to 'model_mel_band_roformer_ep_3005_sdr_11.4360.ckpt')
 separator.load_model()
 
+
+# standardiize
+# vad
+# separate
+# transcribe
+
 # Perform the separation on specific audio files without reloading the model
 # Create a dummy audio file for testing
 with open("audio1.wav", "w") as f:
