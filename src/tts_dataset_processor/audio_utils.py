@@ -1,8 +1,11 @@
 import os
 from dataclasses import dataclass
-from typing import Union, Tuple, Optional
+from pathlib import Path
+from typing import Union, Tuple, Optional, List, Dict
 import numpy as np
 from pydub import AudioSegment
+import soundfile as sf
+import librosa
 
 # Assume logger and cfg are configured elsewhere in your application
 # For example:
@@ -48,7 +51,6 @@ def standardization(audio: Union[str, AudioSegment]) -> AudioData:
         raise ValueError("Invalid audio type")
     # logger.debug("Entering the preprocessing of audio")
 
-    audio: AudioSegment = audio # for clarity
 
     # Convert the audio file to WAV format
     # audio = audio.set_frame_rate(cfg["entrypoint"]["SAMPLE_RATE"])
@@ -116,3 +118,38 @@ def convert_to_16k_mono(input_file: str) -> Tuple[Optional[int], Optional[np.nda
         print(f"An error occurred during conversion: {e}")
         print("Please ensure that ffmpeg is installed and in your system's PATH.")
         return None, None
+
+
+
+def export_to_wav(
+    audio_data: AudioData,
+    asr_result: List[Dict],
+    folder_path: str,
+    file_name_prefix: str,
+):
+    """Export segmented audio to WAV files based on ASR results."""
+    os.makedirs(folder_path, exist_ok=True)
+
+    segments_with_fpaths = []
+    for idx, segment in enumerate(asr_result):
+        start = int(segment["start"] * audio_data.sample_rate)
+        end = int(segment["end"] * audio_data.sample_rate)
+
+        split_audio = audio_data.waveform[start:end]
+
+        # Ensure audio is mono (as librosa.to_mono is mentioned in the original snippet)
+        if split_audio.ndim > 1 and split_audio.shape[1] > 1:
+            split_audio = librosa.to_mono(split_audio)
+
+        out_file = f"{file_name_prefix}_{str(idx).zfill(5)}.wav"
+        out_path = os.path.join(folder_path, out_file)
+        write_wav(out_path, audio_data.sample_rate, split_audio)
+
+        segment["fpath"] = Path(out_path)
+        segments_with_fpaths.append(segment)
+
+    return segments_with_fpaths
+
+def write_wav(path, sr, x):
+    """Write numpy array to WAV file."""
+    sf.write(path, x, sr)
