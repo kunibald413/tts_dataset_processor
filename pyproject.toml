@@ -1,0 +1,19 @@
+[tool.poetry]
+name = "tts_dataset_processor"
+version = "0.1.0"
+description = "A tool to process raw audio files into a dataset suitable for TTS (Text-to-Speech) model training."
+readme = "README.md"
+packages = [{ include = "tts_dataset_processor", from = "src" }]
+
+[tool.poetry.dependencies]
+python = ">=3.10"
+ten-vad = { git = "https://github.com/TEN-framework/ten-vad.git" }
+audio-separator = { git = "https://github.com/nomadkaraoke/python-audio-separator.git" }
+numpy = "1.26"
+scipy = "^1.11.2"
+pydub = "^0.25.1"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
