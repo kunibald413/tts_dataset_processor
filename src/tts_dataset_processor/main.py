@@ -9,29 +9,38 @@ from .audio_utils import (
     convert_to_16k_mono,
     standardization,
     export_to_wav,
-    AudioData,
 )
 from .vad import cut_audio_segments, detect_and_merge_speech_segments
+from .asr.canary.chunked_infer import transcribe_audio_dir
 
 
-def transcribe_audio(audio_path: str):
+def transcribe_audio(vocals_path: str, temp_dir: str):
     """
-    Dummy function for audio transcription.
-    In a real implementation, this would call an ASR model.
+    Transcribes a single audio file using the Canary ASR model.
     """
-    print(f"  - (DUMMY) Transcribing: {audio_path}")
-    # Calculate duration to make the dummy data realistic
+    print(f"  - Transcribing: {vocals_path}")
+    asr_input_dir = os.path.join(temp_dir, "asr_input")
+    if os.path.exists(asr_input_dir):
+        shutil.rmtree(asr_input_dir)
+    os.makedirs(asr_input_dir)
+
+    # Copy the vocal file to the temp directory for the ASR to process
+    shutil.copy(vocals_path, asr_input_dir)
+
+    # Run transcription on the directory
     try:
-        duration = librosa.get_duration(path=audio_path)
-        return [
-            {
-                "start": 0,
-                "end": duration,
-                "text": "This is a dummy transcription of the audio segment.",
-            }
-        ]
+        asr_results = transcribe_audio_dir(inp_audio_dir=asr_input_dir, result_to_file=False, lang="en")
+        if not asr_results or "pred_text" not in asr_results[0]:
+            print("    - ASR returned no transcription.")
+            return []
+
+        # Extract the text and create the format needed for the export function
+        transcribed_text = asr_results[0]["pred_text"]
+        duration = librosa.get_duration(path=vocals_path)
+        return [{"start": 0, "end": duration, "text": transcribed_text}]
+
     except Exception as e:
-        print(f"    - Could not get duration of {audio_path}: {e}")
+        print(f"    - Error during transcription: {e}")
         return []
 
 
@@ -116,7 +125,7 @@ def run_pipeline(
 
         # -- Step 4: Transcribe (ASR) --
         print("[Step 4/5] Transcribing vocals...")
-        asr_result = transcribe_audio(vocals_path)
+        asr_result = transcribe_audio(vocals_path, temp_dir)
         if not asr_result:
             print("  - Transcription failed. Skipping segment.")
             continue
