@@ -22,7 +22,7 @@ from .audio_utils import (
     convert_to_mono,
     AudioData,
 )
-from .vad import cut_audio_segments, detect_and_merge_speech_segments
+from .vad import cut_audio_segments, detect_and_merge_speech_segments, smart_merge_small_segments
 from .asr.canary.chunked_infer import transcribe_audio_dir
 
 # --- Logger Setup ---
@@ -98,9 +98,19 @@ def _run_vad_segmentation(
             raise ValueError("VAD pre-processing failed (could not load audio).")
 
         ten_vad_instance = TenVad(256, 0.5)
-        speech_timestamps = detect_and_merge_speech_segments(
+        initial_timestamps = detect_and_merge_speech_segments(
             ten_vad_instance, data_vad, sr_vad, ten_vad_instance.hop_size, max_duration_s=max_duration
         )
+        
+        # Apply smart merging to avoid many small segments (target around 20-30s for initial VAD)
+        speech_timestamps = smart_merge_small_segments(
+            initial_timestamps, 
+            min_duration=min_duration, 
+            target_duration=30.0,
+            max_merge_gap=2.0
+        )
+        
+        logger.info(f"  Initial VAD detected {len(initial_timestamps)} segments, smart-merged to {len(speech_timestamps)} segments")
         
         # Use the input filename stem as a prefix for VAD segments to ensure uniqueness
         file_stem = Path(input_file).stem
@@ -195,9 +205,19 @@ def _run_final_vad_segmentation(
                 raise ValueError("VAD pre-processing failed (could not load audio).")
 
             ten_vad_instance = TenVad(256, 0.5)
-            speech_timestamps = detect_and_merge_speech_segments(
+            initial_timestamps = detect_and_merge_speech_segments(
                 ten_vad_instance, data_vad, sr_vad, ten_vad_instance.hop_size, max_duration_s=max_duration
             )
+            
+            # Apply smart merging for final segments - aim for ~70% of max duration (8s) for better utilization
+            speech_timestamps = smart_merge_small_segments(
+                initial_timestamps,
+                min_duration=min_duration,
+                target_duration=max_duration * 0.8,  # Target 70% of max (8s for 11.5s max)
+                max_merge_gap=1.0  # Smaller gap for final precise segments
+            )
+            
+            logger.info(f"    Final VAD: {len(initial_timestamps)} initial → {len(speech_timestamps)} optimized segments")
             
             file_stem = Path(concat_file).stem
             cut_audio_segments(

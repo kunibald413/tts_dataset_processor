@@ -192,6 +192,73 @@ def detect_and_merge_speech_segments(
     return processed_segments
 
 
+def smart_merge_small_segments(segments, min_duration=2.3, target_duration=25.0, max_merge_gap=2.0):
+    """
+    Intelligently merges small adjacent segments to avoid having many tiny segments.
+    
+    Args:
+        segments: List of segments with 'start' and 'end' keys
+        min_duration: Minimum duration for segments (segments below this will be merged if possible)
+        target_duration: Target duration to aim for when merging (around 20-30s)
+        max_merge_gap: Maximum gap between segments to allow merging (in seconds)
+    
+    Returns:
+        List of optimally merged segments
+    """
+    if not segments:
+        return segments
+    
+    # Sort segments by start time
+    segments = sorted(segments, key=lambda x: x['start'])
+    merged = []
+    
+    i = 0
+    while i < len(segments):
+        current_segment = segments[i].copy()
+        current_duration = current_segment['end'] - current_segment['start']
+        
+        # If current segment is already good size, keep it
+        if current_duration >= target_duration:
+            merged.append(current_segment)
+            i += 1
+            continue
+        
+        # Try to merge with following segments if current is small
+        if current_duration < target_duration:
+            j = i + 1
+            while j < len(segments):
+                next_segment = segments[j]
+                gap = next_segment['start'] - current_segment['end']
+                
+                # Stop merging if gap is too large
+                if gap > max_merge_gap:
+                    break
+                
+                # Calculate what the duration would be if we merge
+                potential_duration = next_segment['end'] - current_segment['start']
+                
+                # If merging would make it too long, stop
+                if potential_duration > target_duration * 2:
+                    break
+                
+                # Merge this segment
+                current_segment['end'] = next_segment['end']
+                current_duration = potential_duration
+                j += 1
+                
+                # If we've reached a good size, stop merging
+                if current_duration >= target_duration * 0.8:  # 80% of target is good enough
+                    break
+            
+            merged.append(current_segment)
+            i = j  # Skip all the segments we merged
+        else:
+            merged.append(current_segment)
+            i += 1
+    
+    return merged
+
+
 def _run_example():
     input_file = r"E:\tts\xtts\Knut\_raw_data\0\Knut_Im_back.mp3"
     sr, data = convert_to_16k_mono(input_file)
