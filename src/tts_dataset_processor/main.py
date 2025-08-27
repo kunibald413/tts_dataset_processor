@@ -214,8 +214,8 @@ def _run_final_vad_segmentation(
                 initial_timestamps,
                 min_duration=min_duration,
                 target_duration=max_duration * 0.8,  # Target 80% of max (9.2s for 11.5s max)
-                max_merge_gap=1.0,  # Smaller gap for final precise segments
-                max_duration=max_duration  # CRITICAL: Respect the 11.5s hard limit
+                max_merge_gap=0.350,
+                max_duration=max_duration
             )
             
             logger.info(f"    Final VAD: {len(initial_timestamps)} initial → {len(speech_timestamps)} optimized segments")
