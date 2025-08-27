@@ -10,6 +10,8 @@ from ten_vad import TenVad
 from pathlib import Path
 from typing import Dict, List, Iterable, Any
 from dataclasses import dataclass
+import numpy as np
+from audio_utils import AudioData
 
 from .audio_utils import (
     convert_to_16k_mono,
@@ -407,13 +409,24 @@ def _batch_export(transcriptions: Dict[str, List[Dict]], output_dir: str) -> Ste
                 raise ValueError("No transcription result available.")
 
             vocals_audio_data = load_audio_data(vocal_path)
+            
+            # Convert the normalized float waveform back to int16 for saving
+            waveform_int16 = (vocals_audio_data.waveform * 32767).astype(np.int16)
+            
             base_filename = os.path.basename(vocal_path).replace("_(vocals)", "")
             final_filename_prefix = os.path.splitext(base_filename)[0]
             
             # Since we know there is only one segment in the asr_result list, we can get the fpath
-            # from the return value of export_to_wav
+            # from the return value of export_to_wav. We need to create a temporary AudioData
+            # object with the int16 waveform to pass to the export function.
+            export_data = AudioData(
+                waveform=waveform_int16,
+                name=vocals_audio_data.name,
+                sample_rate=vocals_audio_data.sample_rate
+            )
+
             exported_segments = export_to_wav(
-                audio_data=vocals_audio_data,
+                audio_data=export_data,
                 asr_result=asr_result,
                 folder_path=output_dir,
                 file_name_prefix=final_filename_prefix,

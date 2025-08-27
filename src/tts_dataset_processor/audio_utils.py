@@ -84,12 +84,17 @@ def standardization(audio: Union[str, AudioSegment]) -> AudioData:
 def load_audio_data(file_path: str) -> AudioData:
     """
     Loads an audio file and returns an AudioData object without standardization.
+    The waveform is normalized to the [-1.0, 1.0] range.
     """
     audio = AudioSegment.from_file(file_path)
-    waveform = np.array(audio.get_array_of_samples(), dtype=np.float32)
+    # Convert to a numpy array of int16 samples
+    waveform_int = np.array(audio.get_array_of_samples())
+    
+    # Normalize to float32 in the range [-1.0, 1.0]
+    waveform_float = waveform_int.astype(np.float32) / 32768.0
 
     return AudioData(
-        waveform=waveform,
+        waveform=waveform_float,
         name=os.path.basename(file_path),
         sample_rate=audio.frame_rate,
     )
@@ -158,6 +163,7 @@ def export_to_wav(
         start = int(segment["start"] * audio_data.sample_rate)
         end = int(segment["end"] * audio_data.sample_rate)
 
+        # The waveform is now expected to be int16
         split_audio = audio_data.waveform[start:end]
 
         # Ensure audio is mono (as librosa.to_mono is mentioned in the original snippet)
@@ -166,6 +172,8 @@ def export_to_wav(
 
         out_file = f"{file_name_prefix}_{str(idx).zfill(5)}.wav"
         out_path = os.path.join(folder_path, out_file)
+        
+        # Write the int16 data directly.
         write_wav(out_path, audio_data.sample_rate, split_audio)
 
         segment["fpath"] = Path(out_path)
