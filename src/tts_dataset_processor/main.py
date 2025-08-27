@@ -431,9 +431,8 @@ def _batch_prepare_for_asr(vocal_files: List[ProcessedFile], temp_dir: str) -> D
             else:
                 shutil.copy2(vocal_path, asr_ready_path)
             
-            # Create ProcessedFile for the ASR-ready file that preserves original source
-            asr_ready_processed = ProcessedFile(filepath=asr_ready_path, original_source=processed_vocal.original_source)
-            path_map[asr_ready_path] = asr_ready_processed
+            # Map ASR-ready file back to the original high-quality vocal file (not the 16kHz version)
+            path_map[asr_ready_path] = processed_vocal
         except Exception as e:
             logger.error(f"Failed to prepare {vocal_path} for ASR: {e}", exc_info=True)
             # This file will be skipped as it won't be in the path_map
