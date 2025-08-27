@@ -164,6 +164,77 @@ def _process_segment(
     logger.info(f"Final segment exported to '{output_dir}' with prefix '{final_filename_prefix}'.")
 
 
+# --- Batch Processing Functions ---
+
+def _batch_standardize(vad_segment_paths: List[str], standardized_dir: str) -> List[Path]:
+    """Runs standardization on a list of audio files."""
+    logger.info("\n--- [Step 2/5] Standardizing all segments ---")
+    standardized_files = []
+    for segment_path in vad_segment_paths:
+        segment_filename = os.path.basename(segment_path)
+        standardized_data = standardization(segment_path)
+        temp_export_prefix = os.path.splitext(segment_filename)[0]
+        # Temporarily save the standardized file for the next step
+        export_to_wav(
+            audio_data=standardized_data,
+            asr_result=[{"start": 0, "end": standardized_data.waveform.shape[0] / standardized_data.sample_rate}],
+            folder_path=standardized_dir,
+            file_name_prefix=temp_export_prefix,
+        )
+        standardized_file_path = next(Path(standardized_dir).glob(f"{temp_export_prefix}*.wav"))
+        standardized_files.append(standardized_file_path)
+        logger.info(f"  - Standardized: {standardized_file_path}")
+    return standardized_files
+
+
+def _batch_separate(standardized_files: List[Path], separator: Separator) -> List[str]:
+    """Runs vocal separation on a list of standardized audio files."""
+    logger.info("\n--- [Step 3/5] Separating vocals for all segments ---")
+    vocal_files = []
+    for standardized_file in standardized_files:
+        try:
+            output_filenames = separator.separate([standardized_file])
+            # Corrected to use lowercase "(vocals)" as requested
+            vocals_filename = next((f for f in output_filenames if "(vocals)" in f), None)
+            if not vocals_filename:
+                logger.warning(f"No vocals file found for {standardized_file}. Skipping.")
+                continue
+
+            vocals_path = os.path.abspath(os.path.join(separator.output_dir, vocals_filename))
+            if not os.path.exists(vocals_path):
+                logger.error(f"Separated vocals file not found at expected path: {vocals_path}. Skipping.")
+                continue
+
+            vocal_files.append(vocals_path)
+            logger.info(f"  - Separated vocals to: {vocals_path}")
+        except Exception as e:
+            logger.error(f"Error separating {standardized_file}: {e}", exc_info=True)
+    return vocal_files
+
+
+def _batch_transcribe_and_export(vocal_files: List[str], temp_dir: str, output_dir: str):
+    """Runs transcription and final export on a list of vocal audio files."""
+    logger.info("\n--- [Step 4&5/5] Transcribing and Exporting all vocal segments ---")
+    for vocal_path in vocal_files:
+        logger.info(f"--- Processing vocal file: {os.path.basename(vocal_path)} ---")
+        asr_result = _transcribe_segment(vocal_path, temp_dir)
+        if not asr_result:
+            logger.warning(f"Transcription failed for {vocal_path}. Skipping.")
+            continue
+
+        vocals_audio_data = standardization(vocal_path)
+        # Clean up the filename for the final output
+        base_filename = os.path.basename(vocal_path).replace("_(vocals)", "")
+        final_filename_prefix = os.path.splitext(base_filename)[0]
+        export_to_wav(
+            audio_data=vocals_audio_data,
+            asr_result=asr_result,
+            folder_path=output_dir,
+            file_name_prefix=final_filename_prefix,
+        )
+        logger.info(f"  - Final segment exported to '{output_dir}' with prefix '{final_filename_prefix}'.")
+
+
 # --- Main Pipeline Runner ---
 
 
@@ -176,7 +247,7 @@ def run_pipeline(
     separator_model_file_name: str = "melband_roformer_big_beta4.ckpt",
 ):
     """
-    Runs the full audio processing pipeline.
+    Runs the full audio processing pipeline in batch stages.
     1. VAD Segmentation -> 2. Standardization -> 3. Separation -> 4. ASR -> 5. Export
     """
     logger.info(f"--- Starting Pipeline for: {input_file} ---")
@@ -192,15 +263,16 @@ def run_pipeline(
         logger.error("No segments produced by VAD. Halting pipeline.")
         return
 
-    # -- Initialize Separator --
-    logger.info("Initializing audio separator model...")
+    # -- Step 2: Batch Standardization --
+    standardized_files = _batch_standardize(vad_segment_paths, dirs["standardized"])
+
+    # -- Step 3: Batch Separation --
     separator = Separator(output_dir=dirs["separated"])
     separator.load_model(separator_model_file_name)
+    vocal_files = _batch_separate(standardized_files, separator)
 
-    # -- Processing Loop --
-    for i, segment_path in enumerate(vad_segment_paths):
-        logger.info(f"\n--- Processing segment {i+1}/{len(vad_segment_paths)}: {os.path.basename(segment_path)} ---")
-        _process_segment(segment_path, dirs, separator, output_dir)
+    # -- Step 4 & 5: Batch Transcription and Export --
+    _batch_transcribe_and_export(vocal_files, temp_dir, output_dir)
 
     logger.info("\n--- Pipeline Finished ---")
 
