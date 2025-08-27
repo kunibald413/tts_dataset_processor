@@ -111,7 +111,6 @@ def _run_vad_segmentation(
         segment_files = sorted([f for f in os.listdir(vad_segments_dir) if f.startswith(file_stem)])
         logger.info(f"VAD produced {len(segment_files)} segments for {os.path.basename(input_file)}.")
         
-        # Create ProcessedFile objects that track the original source
         original_source = Path(input_file).stem
         processed_files = [
             ProcessedFile(filepath=os.path.join(vad_segments_dir, f), original_source=original_source)
@@ -133,7 +132,6 @@ def _concatenate_segments_by_source(
     concatenated_files = []
     failures = []
     
-    # Group vocal files by their original source (now tracked explicitly)
     source_groups = {}
     for processed_file in vocal_files:
         source_name = processed_file.original_source
@@ -142,15 +140,12 @@ def _concatenate_segments_by_source(
             source_groups[source_name] = []
         source_groups[source_name].append(processed_file.filepath)
     
-    # Process each source group
     for source_name, segments in source_groups.items():
         try:
             logger.info(f"  - Concatenating {len(segments)} segments for {source_name}")
             
-            # Sort segments to maintain order
             segments.sort()
             
-            # Load and concatenate segments with silence
             combined_audio = None
             silence = AudioSegment.silent(duration=silence_duration_ms)
             
@@ -160,10 +155,8 @@ def _concatenate_segments_by_source(
                 if combined_audio is None:
                     combined_audio = segment_audio
                 else:
-                    # Add silence then the next segment
                     combined_audio += silence + segment_audio
             
-            # Export concatenated file
             if combined_audio is None:
                 raise ValueError(f"No audio segments found for source {source_name}")
             
@@ -171,7 +164,6 @@ def _concatenate_segments_by_source(
             concat_path = os.path.join(concat_dir, concat_filename)
             combined_audio.export(concat_path, format="wav")
             
-            # Create ProcessedFile to track original source
             processed_concat = ProcessedFile(filepath=concat_path, original_source=source_name)
             concatenated_files.append(processed_concat)
             logger.info(f"    Created concatenated file: {concat_filename}")
@@ -207,7 +199,6 @@ def _run_final_vad_segmentation(
                 ten_vad_instance, data_vad, sr_vad, ten_vad_instance.hop_size, max_duration_s=max_duration
             )
             
-            # Use the concatenated filename stem as a prefix for final VAD segments
             file_stem = Path(concat_file).stem
             cut_audio_segments(
                 speech_timestamps, concat_file, vad_final_dir, min_duration, output_prefix=file_stem
@@ -215,8 +206,7 @@ def _run_final_vad_segmentation(
 
             segment_files = sorted([f for f in os.listdir(vad_final_dir) if f.startswith(file_stem)])
             logger.info(f"    Final VAD produced {len(segment_files)} segments.")
-            
-            # Create ProcessedFile objects that preserve the original source
+
             for segment_file in segment_files:
                 segment_path = os.path.join(vad_final_dir, segment_file)
                 processed_segment = ProcessedFile(filepath=segment_path, original_source=original_source)
@@ -228,35 +218,6 @@ def _run_final_vad_segmentation(
             failures.append(failure)
 
     return StepResult(successful_outputs=all_final_segments, failures=failures)
-
-
-def _transcribe_segment(vocals_path: str, temp_dir: str) -> List[Dict]:
-    """Transcribes a single audio file using the Canary ASR model."""
-    logger.info("[Step 5/7] Transcribing vocals...")
-    asr_input_dir = os.path.join(temp_dir, "4_asr_input")  # Subdir for this task
-    if os.path.exists(asr_input_dir):
-        shutil.rmtree(asr_input_dir)
-    os.makedirs(asr_input_dir)
-
-    shutil.copy(vocals_path, asr_input_dir)
-
-    try:
-        # transcribe_audio_dir returns a list of TranscriptionResult objects
-        asr_results = transcribe_audio_dir(inp_audio_dir=asr_input_dir, result_to_file=False, lang="en")
-        if not asr_results:
-            logger.warning("ASR returned no transcription.")
-            return []
-
-        # The result is a list of dataclass objects, not dicts
-        transcribed_text = asr_results[0].text
-        duration = librosa.get_duration(path=vocals_path)
-        logger.info(f"Transcription successful: '{transcribed_text[:50]}...'")
-        return [{"start": 0, "end": duration, "text": transcribed_text}]
-
-    except Exception as e:
-        logger.error(f"Error during transcription: {e}", exc_info=True)
-        return []
-
 
 
 def _group_into_chunks(data: Iterable[Any], chunk_size: int) -> List[List[Any]]:
@@ -273,8 +234,8 @@ def _group_into_chunks(data: Iterable[Any], chunk_size: int) -> List[List[Any]]:
 
     # Check if there are at least two chunks and the last one is smaller than the chunk size
     if len(chunks) > 1 and len(chunks[-1]) < chunk_size:
-        last_chunk = chunks.pop()  # Remove the last chunk
-        chunks[-1].extend(last_chunk)  # Add its elements to the new last chunk
+        last_chunk = chunks.pop()
+        chunks[-1].extend(last_chunk)
 
     return chunks
 
@@ -315,7 +276,6 @@ def _batch_standardize(vad_segments: List[ProcessedFile], standardized_dir: str)
             standardized_file_path = os.path.join(standardized_dir, segment_filename)
             export_to_wav(standardized_data, standardized_file_path)
             
-            # Create ProcessedFile to preserve original source tracking
             processed_standardized = ProcessedFile(filepath=str(standardized_file_path), original_source=original_source)
             standardized_files.append(processed_standardized)
             logger.info(f"  - Standardized: {standardized_file_path}")
@@ -340,7 +300,6 @@ def _batch_separate(standardized_files: List[ProcessedFile], separator: Separato
     vocal_files = []
     failures = []
     
-    # Convert ProcessedFile objects to paths for chunking, but keep metadata
     file_paths_with_metadata = [(pf.filepath, pf.original_source) for pf in standardized_files]
     file_chunks = _group_into_chunks([fp for fp, _ in file_paths_with_metadata], 5)
     metadata_chunks = _group_into_chunks([md for _, md in file_paths_with_metadata], 5)
@@ -352,7 +311,7 @@ def _batch_separate(standardized_files: List[ProcessedFile], separator: Separato
         logger.info(f"  - Processing chunk {i+1} with {len(chunk)} files...")
         
         try:
-            # --- Concatenate files in the chunk ---
+            # --- Concatenate files in the chunk, separator model can have issues with too short audios ---
             combined_audio = AudioSegment.empty()
             durations_ms = []
             original_filenames = []
@@ -366,7 +325,6 @@ def _batch_separate(standardized_files: List[ProcessedFile], separator: Separato
             concatenated_path = os.path.join(concatenated_dir, f"chunk_{i}.wav")
             combined_audio.export(concatenated_path, format="wav")
 
-            # --- Run separator on the single concatenated file ---
             output_filenames = separator.separate([concatenated_path])
             vocals_filename = next((f for f in output_filenames if "(vocals)" in f), None)
             
@@ -390,7 +348,6 @@ def _batch_separate(standardized_files: List[ProcessedFile], separator: Separato
                 
                 split_vocal.export(split_vocal_path, format="wav")
                 
-                # Create ProcessedFile to preserve original source tracking
                 processed_vocal = ProcessedFile(filepath=split_vocal_path, original_source=original_source)
                 vocal_files.append(processed_vocal)
                 logger.info(f"    - Split and saved separated vocal to: {split_vocal_path}")
@@ -435,7 +392,6 @@ def _batch_prepare_for_asr(vocal_files: List[ProcessedFile], temp_dir: str) -> D
             path_map[asr_ready_path] = processed_vocal
         except Exception as e:
             logger.error(f"Failed to prepare {vocal_path} for ASR: {e}", exc_info=True)
-            # This file will be skipped as it won't be in the path_map
     
     return path_map
 
@@ -452,7 +408,6 @@ def _batch_transcribe(
         return StepResult(successful_outputs={}, failures=[])
 
     try:
-        # Run transcription on the entire directory at once
         asr_input_dir = os.path.dirname(asr_input_files[0])
         asr_results = transcribe_audio_dir(
             inp_audio_dir=asr_input_dir,
@@ -505,7 +460,6 @@ def _batch_export(transcriptions: Dict[str, List[Dict]], wavs_output_dir: str) -
     exported_files = []
     failures = []
     
-    # Sort transcriptions by original filename to ensure a consistent numerical order.
     sorted_items = sorted(transcriptions.items())
 
     for i, (vocal_path, asr_result) in enumerate(sorted_items):
@@ -513,7 +467,6 @@ def _batch_export(transcriptions: Dict[str, List[Dict]], wavs_output_dir: str) -
             if not asr_result or "text" not in asr_result[0]:
                 raise ValueError("No transcription text available.")
             
-            # Skip if text is empty
             text = asr_result[0]["text"].strip()
             if not text:
                 logger.info(f"  - Skipping '{vocal_path}' (empty transcription)")
@@ -524,7 +477,6 @@ def _batch_export(transcriptions: Dict[str, List[Dict]], wavs_output_dir: str) -
             base_filename = os.path.basename(vocal_path).replace("_(vocals)", "")
             final_wav_path = os.path.join(wavs_output_dir, base_filename)
             
-            # 1. Copy the final audio file and convert to mono
             convert_to_mono(vocal_path, final_wav_path)
             
             exported_files.append({
@@ -551,7 +503,6 @@ def _create_metadata_csv(export_results: List[Dict], output_dir: str, speaker_na
     try:
         with open(csv_path, "w", encoding="utf-8") as f:
             f.write(f"{csv_header}\n")
-            # Sort by the new basename to ensure CSV is in numerical order
             for result in sorted(export_results, key=lambda x: x['basename']):
                 relative_path = f"wavs/{os.path.basename(result['filepath'])}"
                 text = result["text"]
@@ -574,7 +525,6 @@ def _create_metadata_json(
     total_duration = 0
     entries = []
 
-    # Sort by the new basename to ensure JSON is in numerical order
     for result in sorted(export_results, key=lambda x: x['basename']):
         try:
             duration = librosa.get_duration(path=result['filepath'])
