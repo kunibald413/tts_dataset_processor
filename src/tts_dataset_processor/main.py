@@ -4,9 +4,10 @@ import librosa
 import logging
 import sys
 from audio_separator.separator import Separator
+from pydub import AudioSegment
 from ten_vad import TenVad
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Iterable, Any
 
 from .audio_utils import (
     convert_to_16k_mono,
@@ -165,7 +166,12 @@ def _process_segment(
     logger.info(f"Final segment exported to '{output_dir}' with prefix '{final_filename_prefix}'.")
 
 
-# --- Batch Processing Functions ---
+def _group_into_chunks(data: Iterable[Any], chunk_size: int) -> Iterable[List[Any]]:
+    """Groups an iterable into chunks of a specific size."""
+    data = list(data)
+    for i in range(0, len(data), chunk_size):
+        yield data[i : i + chunk_size]
+
 
 def _batch_standardize(vad_segment_paths: List[str], standardized_dir: str) -> List[Path]:
     """Runs standardization on a list of audio files."""
@@ -188,28 +194,75 @@ def _batch_standardize(vad_segment_paths: List[str], standardized_dir: str) -> L
     return standardized_files
 
 
-def _batch_separate(standardized_files: List[Path], separator: Separator) -> List[str]:
-    """Runs vocal separation on a list of standardized audio files."""
-    logger.info("\n--- [Step 3/5] Separating vocals for all segments ---")
+def _batch_separate(standardized_files: List[Path], separator: Separator, temp_dir: str) -> List[str]:
+    """
+    Runs vocal separation on a list of standardized audio files,
+    grouping short files together to improve separation quality.
+    """
+    logger.info("\n--- [Step 3/5] Separating vocals for all segments (with chunking) ---")
+    
+    # Create a temporary directory for the concatenated audio chunks
+    concatenated_dir = os.path.join(temp_dir, "3a_concatenated")
+    os.makedirs(concatenated_dir, exist_ok=True)
+
     vocal_files = []
-    for standardized_file in standardized_files:
+    file_chunks = _group_into_chunks(standardized_files, 4)
+
+    for i, chunk in enumerate(file_chunks):
+        if not chunk:
+            continue
+
+        logger.info(f"  - Processing chunk {i+1} with {len(chunk)} files...")
+        
+        # --- Concatenate files in the chunk ---
+        combined_audio = AudioSegment.empty()
+        durations_ms = []
+        original_filenames = []
+
+        for file_path in chunk:
+            audio_segment = AudioSegment.from_file(file_path)
+            combined_audio += audio_segment
+            durations_ms.append(len(audio_segment))
+            original_filenames.append(os.path.basename(file_path))
+
+        concatenated_path = os.path.join(concatenated_dir, f"chunk_{i}.wav")
+        combined_audio.export(concatenated_path, format="wav")
+
+        # --- Run separator on the single concatenated file ---
         try:
-            output_filenames = separator.separate([standardized_file])
-            # Corrected to use lowercase "(vocals)" as requested
+            output_filenames = separator.separate([concatenated_path])
             vocals_filename = next((f for f in output_filenames if "(vocals)" in f), None)
+            
             if not vocals_filename:
-                logger.warning(f"No vocals file found for {standardized_file}. Skipping.")
+                logger.warning(f"No vocals file found for chunk {i}. Skipping.")
                 continue
 
             vocals_path = os.path.abspath(os.path.join(separator.output_dir, vocals_filename))
             if not os.path.exists(vocals_path):
-                logger.error(f"Separated vocals file not found at expected path: {vocals_path}. Skipping.")
+                logger.error(f"Separated vocals file for chunk {i} not found. Skipping.")
                 continue
 
-            vocal_files.append(vocals_path)
-            logger.info(f"  - Separated vocals to: {vocals_path}")
+            # --- Split the separated vocals back into individual files ---
+            separated_vocals_audio = AudioSegment.from_file(vocals_path)
+            start_ms = 0
+            for j, duration_ms in enumerate(durations_ms):
+                end_ms = start_ms + duration_ms
+                split_vocal = separated_vocals_audio[start_ms:end_ms]
+                
+                # Create a new filename for the split vocal file
+                original_base_name = os.path.splitext(original_filenames[j])[0]
+                split_vocal_filename = f"{original_base_name}_(vocals).wav"
+                split_vocal_path = os.path.join(separator.output_dir, split_vocal_filename)
+                
+                split_vocal.export(split_vocal_path, format="wav")
+                vocal_files.append(split_vocal_path)
+                logger.info(f"    - Split and saved separated vocal to: {split_vocal_path}")
+                
+                start_ms = end_ms
+
         except Exception as e:
-            logger.error(f"Error separating {standardized_file}: {e}", exc_info=True)
+            logger.error(f"Error processing chunk {i}: {e}", exc_info=True)
+
     return vocal_files
 
 
@@ -302,7 +355,7 @@ def run_pipeline(
     # -- Step 3: Batch Separation --
     separator = Separator(output_dir=dirs["separated"])
     separator.load_model(separator_model_file_name)
-    vocal_files = _batch_separate(standardized_files, separator)
+    vocal_files = _batch_separate(standardized_files, separator, temp_dir)
 
     # -- Step 4: Batch Transcription --
     transcriptions = _batch_transcribe(vocal_files, temp_dir)
