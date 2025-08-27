@@ -16,6 +16,7 @@ from .audio_utils import (
     standardization,
     export_to_wav,
     load_audio_data,
+    convert_to_wav,
 )
 from .vad import cut_audio_segments, detect_and_merge_speech_segments
 from .asr.canary.chunked_infer import transcribe_audio_dir
@@ -317,37 +318,63 @@ def _batch_separate(standardized_files: List[Path], separator: Separator, temp_d
     return StepResult(successful_outputs=vocal_files, failures=failures)
 
 
-def _batch_transcribe(vocal_files: List[str], temp_dir: str) -> StepResult:
-    """Runs transcription on a batch of vocal files."""
-    logger.info("\n--- [Step 4/5] Transcribing all vocal segments in a single batch ---")
+def _batch_prepare_for_asr(vocal_files: List[str], temp_dir: str) -> Dict[str, str]:
+    """
+    Ensures all vocal files are 16kHz mono WAV for the ASR model.
+    Returns a mapping of {asr_input_path: original_vocal_path}.
+    """
+    logger.info("\n--- [Step 4/6] Preparing files for ASR ---")
     asr_input_dir = os.path.join(temp_dir, "4_asr_input")
     if os.path.exists(asr_input_dir):
         shutil.rmtree(asr_input_dir)
     os.makedirs(asr_input_dir)
 
-    logger.info(f"Copying {len(vocal_files)} vocal files to a temporary directory for ASR...")
+    path_map = {}
     for vocal_path in vocal_files:
-        shutil.copy(vocal_path, asr_input_dir)
+        try:
+            audio = AudioSegment.from_file(vocal_path)
+            asr_ready_path = os.path.join(asr_input_dir, os.path.basename(vocal_path))
+
+            if audio.frame_rate != 16000 or audio.channels != 1 or not vocal_path.lower().endswith('.wav'):
+                logger.info(f"  - Converting '{os.path.basename(vocal_path)}' to 16kHz mono WAV.")
+                convert_to_wav(vocal_path, asr_ready_path)
+            else:
+                shutil.copy2(vocal_path, asr_ready_path)
+            
+            path_map[asr_ready_path] = vocal_path
+        except Exception as e:
+            logger.error(f"Failed to prepare {vocal_path} for ASR: {e}", exc_info=True)
+            # This file will be skipped as it won't be in the path_map
+    
+    return path_map
+
+
+def _batch_transcribe(asr_path_map: Dict[str, str], temp_dir: str) -> StepResult:
+    """Runs transcription on a batch of prepared vocal files."""
+    logger.info("\n--- [Step 5/6] Transcribing all vocal segments in a single batch ---")
+    
+    asr_input_files = list(asr_path_map.keys())
+    if not asr_input_files:
+        logger.warning("No files were successfully prepared for ASR.")
+        return StepResult(successful_outputs={}, failures=[])
 
     try:
         # Run transcription on the entire directory at once
+        asr_input_dir = os.path.dirname(asr_input_files[0])
         asr_results = transcribe_audio_dir(inp_audio_dir=asr_input_dir, result_to_file=False, lang="en")
         
-        # Create a dictionary mapping the original filepath to its transcription
         transcriptions = {}
         for result in asr_results:
-            # The result.filepath is inside the asr_input_dir, so we map it back
-            # to the full original path by matching the basename.
-            full_original_path = next((p for p in vocal_files if os.path.basename(p) == os.path.basename(result.filepath)), None)
+            # Map the ASR result file back to its original, high-quality vocal path
+            original_vocal_path = asr_path_map.get(result.filepath)
+            if original_vocal_path:
+                duration = librosa.get_duration(path=original_vocal_path)
+                transcriptions[original_vocal_path] = [{"start": 0, "end": duration, "text": result.text}]
+                logger.info(f"  - Transcribed '{os.path.basename(original_vocal_path)}': '{result.text[:50]}...'")
 
-            if full_original_path:
-                duration = librosa.get_duration(path=full_original_path)
-                transcriptions[full_original_path] = [{"start": 0, "end": duration, "text": result.text}]
-                logger.info(f"  - Transcribed '{os.path.basename(full_original_path)}': '{result.text[:50]}...'")
-
-        # Check for files that were not transcribed for some reason
         failures = []
-        for vocal_file in vocal_files:
+        original_vocal_paths = list(asr_path_map.values())
+        for vocal_file in original_vocal_paths:
             if vocal_file not in transcriptions:
                 failures.append(FailedFile(filepath=vocal_file, reason="ASR did not return a transcription for this file."))
         
@@ -355,17 +382,15 @@ def _batch_transcribe(vocal_files: List[str], temp_dir: str) -> StepResult:
 
     except Exception as e:
         logger.error(f"Error during batch transcription: {e}", exc_info=True)
-        # If the whole batch fails, all files are marked as failed.
-        # Add the full traceback to the first failed file for detailed reporting.
         tb_str = traceback.format_exc()
         detailed_reason = f"Batch transcription failed: {e}\n{tb_str}"
         
         failures = []
-        if vocal_files:
-            failures.append(FailedFile(filepath=vocal_files[0], reason=detailed_reason))
-            # For subsequent files in the same failed batch, add a simpler reason.
-            simple_reason = f"Batch transcription failed (see traceback for {os.path.basename(vocal_files[0])})"
-            for p in vocal_files[1:]:
+        original_vocal_paths = list(asr_path_map.values())
+        if original_vocal_paths:
+            failures.append(FailedFile(filepath=original_vocal_paths[0], reason=detailed_reason))
+            simple_reason = f"Batch transcription failed (see traceback for {os.path.basename(original_vocal_paths[0])})"
+            for p in original_vocal_paths[1:]:
                 failures.append(FailedFile(filepath=p, reason=simple_reason))
         
         return StepResult(successful_outputs={}, failures=failures)
@@ -373,7 +398,7 @@ def _batch_transcribe(vocal_files: List[str], temp_dir: str) -> StepResult:
 
 def _batch_export(transcriptions: Dict[str, List[Dict]], output_dir: str) -> StepResult:
     """Runs final export for a dictionary of transcribed audio files."""
-    logger.info("\n--- [Step 5/5] Exporting all final segments ---")
+    logger.info("\n--- [Step 6/6] Exporting all final segments ---")
     exported_files = []
     failures = []
     for vocal_path, asr_result in transcriptions.items():
@@ -468,15 +493,22 @@ def run_pipeline(
         _print_summary_report(all_failures, 0)
         return
 
-    # -- Step 4: Batch Transcription --
-    transcribe_result = _batch_transcribe(separate_result.successful_outputs, temp_dir)
+    # -- Step 4: Prepare files for ASR --
+    asr_path_map = _batch_prepare_for_asr(separate_result.successful_outputs, temp_dir)
+    if not asr_path_map:
+        logger.error("No files could be prepared for ASR. Halting pipeline.")
+        _print_summary_report(all_failures, 0)
+        return
+
+    # -- Step 5: Batch Transcription --
+    transcribe_result = _batch_transcribe(asr_path_map, temp_dir)
     all_failures.extend(transcribe_result.failures)
     if not transcribe_result.successful_outputs:
         logger.error("No segments were successfully transcribed. Halting pipeline.")
         _print_summary_report(all_failures, 0)
         return
 
-    # -- Step 5: Batch Export --
+    # -- Step 6: Batch Export --
     export_result = _batch_export(transcribe_result.successful_outputs, output_dir)
     all_failures.extend(export_result.failures)
 

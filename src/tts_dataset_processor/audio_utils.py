@@ -95,6 +95,15 @@ def load_audio_data(file_path: str) -> AudioData:
     )
 
 
+def convert_to_wav(input_path: str, output_path: str):
+    """
+    Converts an audio file to 16kHz mono WAV format for ASR.
+    """
+    audio = AudioSegment.from_file(input_path)
+    audio = audio.set_frame_rate(16000).set_channels(1)
+    audio.export(output_path, format="wav")
+
+
 def convert_to_16k_mono(input_file: str) -> Tuple[Optional[int], Optional[np.ndarray]]:
     """
     Converts an audio file (WAV, MP3, etc.) to 16kHz mono.
