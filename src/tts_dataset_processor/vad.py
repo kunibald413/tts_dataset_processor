@@ -15,6 +15,7 @@ def cut_audio_segments(
     input_file: str,
     output_folder: str,
     min_duration: float = 2.0,
+    output_prefix: str = "segment",
 ):
     """
     Cuts the input audio file into segments and saves them.
@@ -72,9 +73,9 @@ def cut_audio_segments(
         # Extract the audio data for the current segment
         segment_data = original_data[start_frame:end_frame]
 
-        # Create a nice padded filename, e.g., 'segment_001.wav'
+        # Create a nice padded filename, e.g., 'prefix_001.wav'
         padded_index = str(i + 1).zfill(3)
-        output_filename = f"segment_{padded_index}.wav"
+        output_filename = f"{output_prefix}_{padded_index}.wav"
         output_path = os.path.join(output_folder, output_filename)
 
         # Save the segment as a new WAV file using the original sample rate

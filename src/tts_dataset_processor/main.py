@@ -90,10 +90,15 @@ def _run_vad_segmentation(
         speech_timestamps = detect_and_merge_speech_segments(
             ten_vad_instance, data_vad, sr_vad, ten_vad_instance.hop_size, max_duration_s=max_duration
         )
-        cut_audio_segments(speech_timestamps, input_file, vad_segments_dir, min_duration)
+        
+        # Use the input filename stem as a prefix for VAD segments to ensure uniqueness
+        file_stem = Path(input_file).stem
+        cut_audio_segments(
+            speech_timestamps, input_file, vad_segments_dir, min_duration, output_prefix=file_stem
+        )
 
-        segment_files = sorted(os.listdir(vad_segments_dir))
-        logger.info(f"VAD produced {len(segment_files)} segments.")
+        segment_files = sorted([f for f in os.listdir(vad_segments_dir) if f.startswith(file_stem)])
+        logger.info(f"VAD produced {len(segment_files)} segments for {os.path.basename(input_file)}.")
         output_paths = [os.path.join(vad_segments_dir, f) for f in segment_files]
         return StepResult(successful_outputs=output_paths, failures=[])
 
@@ -420,8 +425,8 @@ def _batch_transcribe(asr_path_map: Dict[str, str], temp_dir: str) -> StepResult
 
 def _batch_export(transcriptions: Dict[str, List[Dict]], wavs_output_dir: str) -> StepResult:
     """
-    Exports the final audio files and their transcriptions, renaming them to a
-    zero-padded numerical sequence.
+    Exports the final audio files and their transcriptions. The final filename is
+    derived from the original source file and VAD segment index.
     """
     logger.info("\n--- [Step 6/6] Exporting all final segments ---")
     exported_files = []
@@ -430,22 +435,23 @@ def _batch_export(transcriptions: Dict[str, List[Dict]], wavs_output_dir: str) -
     # Sort transcriptions by original filename to ensure a consistent numerical order.
     sorted_items = sorted(transcriptions.items())
 
-    for i, (vocal_path, asr_result) in enumerate(sorted_items):
+    for vocal_path, asr_result in sorted_items:
         try:
             if not asr_result or "text" not in asr_result[0]:
                 raise ValueError("No transcription text available.")
 
-            # Determine the new zero-padded filename
-            new_basename = f"{i:05d}"
-            final_wav_path = os.path.join(wavs_output_dir, f"{new_basename}.wav")
+            # The vocal_path already contains the unique name (e.g., source_001_(vocals).wav).
+            # We just need to clean it up for the final export.
+            base_filename = os.path.basename(vocal_path).replace("_(vocals)", "")
+            final_wav_path = os.path.join(wavs_output_dir, base_filename)
             
-            # 1. Copy the final audio file with the new name
+            # 1. Copy the final audio file
             shutil.copy2(vocal_path, final_wav_path)
             
             exported_files.append({
                 "filepath": final_wav_path,
                 "text": asr_result[0]["text"],
-                "basename": new_basename,
+                "basename": os.path.splitext(base_filename)[0],
             })
 
             logger.info(f"  - Exported '{vocal_path}' -> '{final_wav_path}'")
