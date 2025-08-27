@@ -14,6 +14,14 @@
     poetry run python -m tts_dataset_processor.main
     ```
 
+**Note:** To install Poetry on Debian/Ubuntu, you can use `pipx`:
+```bash
+sudo apt update
+sudo apt install pipx -y
+pipx ensurepath
+pipx install poetry
+```
+
 ### Without Poetry
 
 1.  **Install:**
