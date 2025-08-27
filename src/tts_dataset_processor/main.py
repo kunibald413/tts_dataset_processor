@@ -304,9 +304,11 @@ def _batch_prepare_for_asr(vocal_files: List[str], temp_dir: str) -> Dict[str, s
     return path_map
 
 
-def _batch_transcribe(asr_path_map: Dict[str, str], temp_dir: str) -> StepResult:
+def _batch_transcribe(
+    asr_path_map: Dict[str, str], temp_dir: str, asr_model_name: str
+) -> StepResult:
     """Runs transcription on a batch of prepared vocal files."""
-    logger.info("\n--- [Step 5/6] Transcribing all vocal segments in a single batch ---")
+    logger.info(f"\n--- [Step 5/6] Transcribing all vocal segments in a single batch using {asr_model_name} ---")
     
     asr_input_files = list(asr_path_map.keys())
     if not asr_input_files:
@@ -316,7 +318,12 @@ def _batch_transcribe(asr_path_map: Dict[str, str], temp_dir: str) -> StepResult
     try:
         # Run transcription on the entire directory at once
         asr_input_dir = os.path.dirname(asr_input_files[0])
-        asr_results = transcribe_audio_dir(inp_audio_dir=asr_input_dir, result_to_file=False, lang="en")
+        asr_results = transcribe_audio_dir(
+            inp_audio_dir=asr_input_dir,
+            result_to_file=False,
+            lang="en",
+            pretrained_name=asr_model_name,
+        )
         
         transcriptions = {}
         for result in asr_results:
@@ -411,7 +418,12 @@ def _create_metadata_csv(export_results: List[Dict], output_dir: str, speaker_na
         logger.error(f"Failed to create metadata.csv: {e}", exc_info=True)
 
 
-def _create_metadata_json(export_results: List[Dict], output_dir: str, speaker_name: str):
+def _create_metadata_json(
+    export_results: List[Dict],
+    output_dir: str,
+    speaker_name: str,
+    processing_params: Dict,
+):
     """Creates a detailed metadata.json file for the dataset."""
     logger.info("\n--- Creating metadata.json ---")
     json_path = os.path.join(output_dir, "metadata.json")
@@ -433,6 +445,7 @@ def _create_metadata_json(export_results: List[Dict], output_dir: str, speaker_n
             logger.error(f"Could not process {result['filepath']} for JSON metadata: {e}")
 
     metadata = {
+        "processing_parameters": processing_params,
         "total_duration": round(total_duration, 2),
         "total_files": len(entries),
         "speaker_name": speaker_name,
@@ -472,6 +485,7 @@ def run_pipeline(
     max_duration: float = 11.5,
     separator_model_file_name: str = "melband_roformer_big_beta4.ckpt",
     speaker_name: str = "coqui",
+    asr_model_name: str = "nvidia/canary-1b-flash",
 ):
     """
     Runs the full audio processing pipeline in batch stages.
@@ -531,7 +545,7 @@ def run_pipeline(
         return
 
     # -- Step 5: Batch Transcription --
-    transcribe_result = _batch_transcribe(asr_path_map, temp_dir)
+    transcribe_result = _batch_transcribe(asr_path_map, temp_dir, asr_model_name)
     all_failures.extend(transcribe_result.failures)
     if not transcribe_result.successful_outputs:
         logger.error("No segments were successfully transcribed. Halting pipeline.")
@@ -544,8 +558,16 @@ def run_pipeline(
 
     # -- Final Step: Create Metadata CSV --
     if export_result.successful_outputs:
+        processing_params = {
+            "asr_model": asr_model_name,
+            "min_duration_seconds": min_duration,
+            "max_duration_seconds": max_duration,
+            "separator_model": separator_model_file_name,
+        }
         _create_metadata_csv(export_result.successful_outputs, output_dir, speaker_name)
-        _create_metadata_json(export_result.successful_outputs, output_dir, speaker_name)
+        _create_metadata_json(
+            export_result.successful_outputs, output_dir, speaker_name, processing_params
+        )
 
     logger.info("\n--- Pipeline Finished ---")
     _print_summary_report(all_failures, len(export_result.successful_outputs))
@@ -557,4 +579,8 @@ if __name__ == "__main__":
     # input_audio = r"E:\tts\xtts\Knut\_raw_data\0\Knut_Im_back.mp3"
     # Example for a directory:
     input_audio = r"E:\tts\xtts\Knut\_raw_data"
-    run_pipeline(input_path=input_audio, speaker_name="knut")
+    run_pipeline(
+        input_path=input_audio,
+        speaker_name="knut",
+        asr_model_name="nvidia/canary-1b",
+    )

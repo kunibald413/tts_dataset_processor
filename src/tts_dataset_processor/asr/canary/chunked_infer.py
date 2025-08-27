@@ -11,10 +11,23 @@ from .speech_to_text_aed_chunked_infer import TranscriptionConfig, Transcription
 from .canary_manifest_utils import create_manifest
 
 CANARY_LANGS = {'en', 'de', 'es', 'fr'}
+SUPPORTED_MODELS = {"nvidia/canary-1b", "nvidia/canary-1b-flash"}
 
-def transcribe_audio_dir(inp_audio_dir: str, result_to_file: bool = False, lang: str = 'en') -> List[TranscriptionResult]:
+
+def transcribe_audio_dir(
+    inp_audio_dir: str,
+    result_to_file: bool = False,
+    lang: str = 'en',
+    pretrained_name: str = "nvidia/canary-1b-flash",
+) -> List[TranscriptionResult]:
+    """
+    Transcribes all audio files in a directory using a specified Canary model.
+    """
+    if pretrained_name not in SUPPORTED_MODELS:
+        raise ValueError(f"Unsupported pretrained_name: '{pretrained_name}'. Must be one of {SUPPORTED_MODELS}")
+
     cfg = TranscriptionConfig()
-    cfg.pretrained_name = "nvidia/canary-1b"
+    cfg.pretrained_name = pretrained_name
 
     if not is_valid_lang(lang):
         raise Exception(f"invalid canary language: '{lang}', must be one of {CANARY_LANGS}")
