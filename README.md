@@ -2,10 +2,10 @@
 
 ## Installation & Usage
 
-> **Prerequisite:** This tool requires `ffmpeg`. On Debian/Ubuntu, you can install it with:
+> **Prerequisites:** This tool requires `ffmpeg` and `libc++1`. On Debian/Ubuntu, you can install them with:
 >
 > ```bash
-> apt update && apt install ffmpeg -y
+> apt update && apt install ffmpeg libc++1 -y
 > ```
 
 ### With Poetry (Recommended)
