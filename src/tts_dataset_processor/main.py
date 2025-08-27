@@ -3,6 +3,7 @@ import shutil
 import librosa
 import logging
 import sys
+import traceback
 from audio_separator.separator import Separator
 from pydub import AudioSegment
 from ten_vad import TenVad
@@ -355,7 +356,18 @@ def _batch_transcribe(vocal_files: List[str], temp_dir: str) -> StepResult:
     except Exception as e:
         logger.error(f"Error during batch transcription: {e}", exc_info=True)
         # If the whole batch fails, all files are marked as failed.
-        failures = [FailedFile(filepath=p, reason=f"Batch transcription failed: {e}") for p in vocal_files]
+        # Add the full traceback to the first failed file for detailed reporting.
+        tb_str = traceback.format_exc()
+        detailed_reason = f"Batch transcription failed: {e}\n{tb_str}"
+        
+        failures = []
+        if vocal_files:
+            failures.append(FailedFile(filepath=vocal_files[0], reason=detailed_reason))
+            # For subsequent files in the same failed batch, add a simpler reason.
+            simple_reason = f"Batch transcription failed (see traceback for {os.path.basename(vocal_files[0])})"
+            for p in vocal_files[1:]:
+                failures.append(FailedFile(filepath=p, reason=simple_reason))
+        
         return StepResult(successful_outputs={}, failures=failures)
 
 
