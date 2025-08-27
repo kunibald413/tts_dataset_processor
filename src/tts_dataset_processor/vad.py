@@ -89,7 +89,15 @@ def cut_audio_segments(
     print("All segments have been saved.")
 
 
-def detect_and_merge_speech_segments(ten_vad_instance, data, sr, hop_size, merge_gap_s=0.150, max_duration_s=None, verbose=False):
+def detect_and_merge_speech_segments(
+    ten_vad_instance, 
+    data, 
+    sr, 
+    hop_size, 
+    merge_gap_s=0.300, 
+    max_duration_s=None, 
+    verbose=False
+):
     """
     Detects speech segments from audio data using TenVad, merges segments with short gaps,
     and splits segments that exceed a maximum duration.
