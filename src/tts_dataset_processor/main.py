@@ -192,11 +192,24 @@ def _process_segment(
     logger.info(f"Final segment exported to '{output_dir}' with prefix '{final_filename_prefix}'.")
 
 
-def _group_into_chunks(data: Iterable[Any], chunk_size: int) -> Iterable[List[Any]]:
-    """Groups an iterable into chunks of a specific size."""
+def _group_into_chunks(data: Iterable[Any], chunk_size: int) -> List[List[Any]]:
+    """
+    Groups an iterable into chunks of a specific size.
+    If the last chunk is smaller than the chunk_size and there are at least
+    two chunks, the last chunk is merged with the second to last one.
+    """
     data = list(data)
-    for i in range(0, len(data), chunk_size):
-        yield data[i : i + chunk_size]
+    if not data:
+        return []
+
+    chunks = [data[i : i + chunk_size] for i in range(0, len(data), chunk_size)]
+
+    # Check if there are at least two chunks and the last one is smaller than the chunk size
+    if len(chunks) > 1 and len(chunks[-1]) < chunk_size:
+        last_chunk = chunks.pop()  # Remove the last chunk
+        chunks[-1].extend(last_chunk)  # Add its elements to the new last chunk
+
+    return chunks
 
 
 # --- Batch Processing Functions ---
@@ -242,7 +255,7 @@ def _batch_separate(standardized_files: List[Path], separator: Separator, temp_d
 
     vocal_files = []
     failures = []
-    file_chunks = _group_into_chunks(standardized_files, 4)
+    file_chunks = _group_into_chunks(standardized_files, 5)
 
     for i, chunk in enumerate(file_chunks):
         if not chunk:
