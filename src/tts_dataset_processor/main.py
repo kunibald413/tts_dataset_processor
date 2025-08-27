@@ -126,7 +126,7 @@ def _process_segment(
     logger.info("[Step 3/5] Separating vocals from instruments...")
     try:
         # The separator returns a list of filenames, not full paths.
-        output_filenames = separator.separate(standardized_file_path)
+        output_filenames = separator.separate([standardized_file_path])
         vocals_filename = next((f for f in output_filenames if "(vocals)" in f), None)
         
         if not vocals_filename:
