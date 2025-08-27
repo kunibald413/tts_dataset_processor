@@ -401,27 +401,35 @@ def _batch_transcribe(asr_path_map: Dict[str, str], temp_dir: str) -> StepResult
 
 def _batch_export(transcriptions: Dict[str, List[Dict]], wavs_output_dir: str) -> StepResult:
     """
-    Exports the final audio files and their transcriptions.
-    This step simply copies the high-quality vocal files to the output directory
-    and creates a corresponding .txt file for each with the transcription.
+    Exports the final audio files and their transcriptions, renaming them to a
+    zero-padded numerical sequence.
     """
     logger.info("\n--- [Step 6/6] Exporting all final segments ---")
     exported_files = []
     failures = []
-    for vocal_path, asr_result in transcriptions.items():
+    
+    # Sort transcriptions by original filename to ensure a consistent numerical order.
+    sorted_items = sorted(transcriptions.items())
+
+    for i, (vocal_path, asr_result) in enumerate(sorted_items):
         try:
             if not asr_result or "text" not in asr_result[0]:
                 raise ValueError("No transcription text available.")
 
-            # Determine the final name and paths
-            base_filename = os.path.basename(vocal_path).replace("_(vocals)", "")
-            final_wav_path = os.path.join(wavs_output_dir, base_filename)
+            # Determine the new zero-padded filename
+            new_basename = f"{i:05d}"
+            final_wav_path = os.path.join(wavs_output_dir, f"{new_basename}.wav")
             
-            # 1. Copy the final audio file
+            # 1. Copy the final audio file with the new name
             shutil.copy2(vocal_path, final_wav_path)
-            exported_files.append({"filepath": final_wav_path, "text": asr_result[0]["text"]})
+            
+            exported_files.append({
+                "filepath": final_wav_path,
+                "text": asr_result[0]["text"],
+                "basename": new_basename,
+            })
 
-            logger.info(f"  - Exported '{final_wav_path}'")
+            logger.info(f"  - Exported '{vocal_path}' -> '{final_wav_path}'")
         
         except Exception as e:
             logger.error(f"Failed to export {vocal_path}: {e}", exc_info=True)
@@ -439,8 +447,9 @@ def _create_metadata_csv(export_results: List[Dict], output_dir: str, speaker_na
     try:
         with open(csv_path, "w", encoding="utf-8") as f:
             f.write(f"{csv_header}\n")
-            for result in export_results:
-                relative_path = f"wavs/{os.path.basename(result['filepath'])}"
+            # Sort by the new basename to ensure CSV is in numerical order
+            for result in sorted(export_results, key=lambda x: x['basename']):
+                relative_path = f"wavs/{result['basename']}.wav"
                 text = result["text"]
                 f.write(f"{relative_path}|{text}|{speaker_name}\n")
         
@@ -456,12 +465,13 @@ def _create_metadata_json(export_results: List[Dict], output_dir: str, speaker_n
     total_duration = 0
     entries = []
 
-    for result in export_results:
+    # Sort by the new basename to ensure JSON is in numerical order
+    for result in sorted(export_results, key=lambda x: x['basename']):
         try:
             duration = librosa.get_duration(path=result['filepath'])
             total_duration += duration
             entries.append({
-                "audio_file": f"wavs/{os.path.basename(result['filepath'])}",
+                "audio_file": f"wavs/{result['basename']}.wav",
                 "text": result["text"],
                 "speaker_name": speaker_name,
                 "duration": round(duration, 2),
