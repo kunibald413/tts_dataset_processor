@@ -14,10 +14,9 @@
     ```bash
     poetry install
     ```
-2.  **Configure:** Edit `src/tts_dataset_processor/main.py` to set the `input_audio` file path.
-3.  **Run:**
+2.  **Run:**
     ```bash
-    poetry run python -m tts_dataset_processor.main
+    poetry run python -m tts_dataset_processor.cli -i path/to/your/audio.mp3
     ```
 
 4. update deps if changed:
@@ -40,10 +39,9 @@ pipx install poetry
     ```bash
     pip install .
     ```
-2.  **Configure:** Edit `src/tts_dataset_processor/main.py` to set the `input_audio` file path.
-3.  **Run:**
+2.  **Run:**
     Make sure your Python environment is activated, then run the script as a module:
     ```bash
-    python -m tts_dataset_processor.main
+    python -m tts_dataset_processor.cli -i path/to/your/audio.mp3
     ```
 
