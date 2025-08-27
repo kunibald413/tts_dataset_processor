@@ -109,6 +109,24 @@ def convert_to_wav(input_path: str, output_path: str):
     audio.export(output_path, format="wav")
 
 
+def export_to_wav(audio_data: AudioData, output_path: str):
+    """Saves an AudioData object to a WAV file."""
+    folder_path = os.path.dirname(output_path)
+    os.makedirs(folder_path, exist_ok=True)
+
+    # The waveform is now expected to be int16
+    waveform = audio_data.waveform
+
+    # Ensure audio is mono
+    if waveform.ndim > 1 and waveform.shape[1] > 1:
+        waveform = librosa.to_mono(waveform)
+
+    # Write the int16 data directly.
+    write_wav(output_path, audio_data.sample_rate, waveform)
+
+    return output_path
+
+
 def convert_to_16k_mono(input_file: str) -> Tuple[Optional[int], Optional[np.ndarray]]:
     """
     Converts an audio file (WAV, MP3, etc.) to 16kHz mono.
@@ -148,38 +166,6 @@ def convert_to_16k_mono(input_file: str) -> Tuple[Optional[int], Optional[np.nda
         return None, None
 
 
-
-def export_to_wav(
-    audio_data: AudioData,
-    asr_result: List[Dict],
-    folder_path: str,
-    file_name_prefix: str,
-):
-    """Export segmented audio to WAV files based on ASR results."""
-    os.makedirs(folder_path, exist_ok=True)
-
-    segments_with_fpaths = []
-    for idx, segment in enumerate(asr_result):
-        start = int(segment["start"] * audio_data.sample_rate)
-        end = int(segment["end"] * audio_data.sample_rate)
-
-        # The waveform is now expected to be int16
-        split_audio = audio_data.waveform[start:end]
-
-        # Ensure audio is mono (as librosa.to_mono is mentioned in the original snippet)
-        if split_audio.ndim > 1 and split_audio.shape[1] > 1:
-            split_audio = librosa.to_mono(split_audio)
-
-        out_file = f"{file_name_prefix}_{str(idx).zfill(5)}.wav"
-        out_path = os.path.join(folder_path, out_file)
-        
-        # Write the int16 data directly.
-        write_wav(out_path, audio_data.sample_rate, split_audio)
-
-        segment["fpath"] = Path(out_path)
-        segments_with_fpaths.append(segment)
-
-    return segments_with_fpaths
 
 def write_wav(path, sr, x):
     """Write numpy array to WAV file."""

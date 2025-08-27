@@ -136,71 +136,6 @@ def _transcribe_segment(vocals_path: str, temp_dir: str) -> List[Dict]:
         return []
 
 
-def _process_segment(
-    segment_path: str,
-    dirs: Dict[str, str],
-    separator: Separator,
-    output_dir: str,
-):
-    """Runs steps 2-5 of the pipeline for a single audio segment."""
-    segment_filename = os.path.basename(segment_path)
-    base_temp_dir = os.path.dirname(dirs["vad"])
-
-    # -- Step 2: Standardize --
-    logger.info("[Step 2/5] Standardizing segment...")
-    standardized_data = standardization(segment_path)
-    # Separator needs a file path, so we save the standardized audio temporarily.
-    temp_export_prefix = os.path.splitext(segment_filename)[0]
-    export_to_wav(
-        audio_data=standardized_data,
-        asr_result=[{"start": 0, "end": standardized_data.waveform.shape[0] / standardized_data.sample_rate}],
-        folder_path=dirs["standardized"],
-        file_name_prefix=temp_export_prefix,
-    )
-    standardized_file_path = next(Path(dirs["standardized"]).glob(f"{temp_export_prefix}*.wav"))
-    logger.info(f"Standardized segment saved to: {standardized_file_path}")
-
-    # -- Step 3: Separate Vocals/Instruments --
-    logger.info("[Step 3/5] Separating vocals from instruments...")
-    try:
-        # The separator returns a list of filenames, not full paths.
-        output_filenames = separator.separate([standardized_file_path])
-        vocals_filename = next((f for f in output_filenames if "(vocals)" in f), None)
-        
-        if not vocals_filename:
-            logger.warning("Could not find vocals file in separator output. Skipping segment.")
-            return
-
-        # Construct the full, absolute path and verify it exists.
-        vocals_path = os.path.abspath(os.path.join(separator.output_dir, vocals_filename))
-        if not os.path.exists(vocals_path):
-            logger.error(f"Separated vocals file not found at expected path: {vocals_path}. Skipping segment.")
-            return
-
-        logger.info(f"Vocals separated to: {vocals_path}")
-
-    except Exception as e:
-        logger.error(f"Error during separation: {e}. Skipping segment.", exc_info=True)
-        return
-
-    # -- Step 4: Transcribe (ASR) --
-    asr_result = _transcribe_segment(vocals_path, base_temp_dir)
-    if not asr_result:
-        logger.warning("Transcription failed. Skipping segment.")
-        return
-
-    # -- Step 5: Export Final Audio --
-    logger.info("[Step 5/5] Exporting final audio segment...")
-    vocals_audio_data = standardization(vocals_path)  # Re-load vocals to get AudioData
-    final_filename_prefix = os.path.splitext(segment_filename)[0]
-    export_to_wav(
-        audio_data=vocals_audio_data,
-        asr_result=asr_result,
-        folder_path=output_dir,
-        file_name_prefix=final_filename_prefix,
-    )
-    logger.info(f"Final segment exported to '{output_dir}' with prefix '{final_filename_prefix}'.")
-
 
 def _group_into_chunks(data: Iterable[Any], chunk_size: int) -> List[List[Any]]:
     """
@@ -253,16 +188,9 @@ def _batch_standardize(vad_segment_paths: List[str], standardized_dir: str) -> S
         try:
             segment_filename = os.path.basename(segment_path)
             standardized_data = standardization(segment_path)
-            temp_export_prefix = os.path.splitext(segment_filename)[0]
-            # Temporarily save the standardized file for the next step
-            export_to_wav(
-                audio_data=standardized_data,
-                asr_result=[{"start": 0, "end": standardized_data.waveform.shape[0] / standardized_data.sample_rate}],
-                folder_path=standardized_dir,
-                file_name_prefix=temp_export_prefix,
-            )
-            standardized_file_path = next(Path(standardized_dir).glob(f"{temp_export_prefix}*.wav"))
-            standardized_files.append(standardized_file_path)
+            standardized_file_path = os.path.join(standardized_dir, segment_filename)
+            export_to_wav(standardized_data, standardized_file_path)
+            standardized_files.append(Path(standardized_file_path))
             logger.info(f"  - Standardized: {standardized_file_path}")
         except Exception as e:
             logger.error(f"Failed to standardize {segment_path}: {e}", exc_info=True)
@@ -435,7 +363,7 @@ def _batch_export(transcriptions: Dict[str, List[Dict]], wavs_output_dir: str) -
     # Sort transcriptions by original filename to ensure a consistent numerical order.
     sorted_items = sorted(transcriptions.items())
 
-    for vocal_path, asr_result in sorted_items:
+    for i, (vocal_path, asr_result) in enumerate(sorted_items):
         try:
             if not asr_result or "text" not in asr_result[0]:
                 raise ValueError("No transcription text available.")
@@ -474,7 +402,7 @@ def _create_metadata_csv(export_results: List[Dict], output_dir: str, speaker_na
             f.write(f"{csv_header}\n")
             # Sort by the new basename to ensure CSV is in numerical order
             for result in sorted(export_results, key=lambda x: x['basename']):
-                relative_path = f"wavs/{result['basename']}.wav"
+                relative_path = f"wavs/{os.path.basename(result['filepath'])}"
                 text = result["text"]
                 f.write(f"{relative_path}|{text}|{speaker_name}\n")
         
@@ -496,7 +424,7 @@ def _create_metadata_json(export_results: List[Dict], output_dir: str, speaker_n
             duration = librosa.get_duration(path=result['filepath'])
             total_duration += duration
             entries.append({
-                "audio_file": f"wavs/{result['basename']}.wav",
+                "audio_file": f"wavs/{os.path.basename(result['filepath'])}",
                 "text": result["text"],
                 "speaker_name": speaker_name,
                 "duration": round(duration, 2),

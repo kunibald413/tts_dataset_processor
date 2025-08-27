@@ -74,7 +74,7 @@ def cut_audio_segments(
         segment_data = original_data[start_frame:end_frame]
 
         # Create a nice padded filename, e.g., 'prefix_001.wav'
-        padded_index = str(i + 1).zfill(3)
+        padded_index = str(i).zfill(4)
         output_filename = f"{output_prefix}_{padded_index}.wav"
         output_path = os.path.join(output_folder, output_filename)
 
@@ -83,7 +83,7 @@ def cut_audio_segments(
             Wavfile.write(output_path, original_sr, segment_data)
             print(f"  - Saved '{output_filename}' (duration: {end_time - start_time:.2f}s)")
         except Exception as e:
-            print(f"  - Error saving segment {i + 1}: {e}")
+            print(f"  - Error saving segment {i}: {e}")
             continue
 
     print("All segments have been saved.")
