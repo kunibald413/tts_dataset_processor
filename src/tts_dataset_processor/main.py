@@ -125,12 +125,22 @@ def _process_segment(
     # -- Step 3: Separate Vocals/Instruments --
     logger.info("[Step 3/5] Separating vocals from instruments...")
     try:
-        output_paths = separator.separate([standardized_file_path])
-        vocals_path = next((p for p in output_paths if "(vocals)" in p), None)
-        if not vocals_path:
+        # The separator returns a list of filenames, not full paths.
+        output_filenames = separator.separate(standardized_file_path)
+        vocals_filename = next((f for f in output_filenames if "(vocals)" in f), None)
+        
+        if not vocals_filename:
             logger.warning("Could not find vocals file in separator output. Skipping segment.")
             return
+
+        # Construct the full, absolute path and verify it exists.
+        vocals_path = os.path.abspath(os.path.join(separator.output_dir, vocals_filename))
+        if not os.path.exists(vocals_path):
+            logger.error(f"Separated vocals file not found at expected path: {vocals_path}. Skipping segment.")
+            return
+
         logger.info(f"Vocals separated to: {vocals_path}")
+
     except Exception as e:
         logger.error(f"Error during separation: {e}. Skipping segment.", exc_info=True)
         return
