@@ -374,6 +374,12 @@ def _batch_export(transcriptions: Dict[str, List[Dict]], wavs_output_dir: str) -
         try:
             if not asr_result or "text" not in asr_result[0]:
                 raise ValueError("No transcription text available.")
+            
+            # Skip if text is empty
+            text = asr_result[0]["text"].strip()
+            if not text:
+                logger.info(f"  - Skipping '{vocal_path}' (empty transcription)")
+                continue
 
             # The vocal_path already contains the unique name (e.g., source_001_(vocals).wav).
             # We just need to clean it up for the final export.
@@ -385,7 +391,7 @@ def _batch_export(transcriptions: Dict[str, List[Dict]], wavs_output_dir: str) -
             
             exported_files.append({
                 "filepath": final_wav_path,
-                "text": asr_result[0]["text"],
+                "text": text,
                 "basename": os.path.splitext(base_filename)[0],
             })
 
