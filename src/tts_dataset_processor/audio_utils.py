@@ -109,6 +109,16 @@ def convert_to_wav(input_path: str, output_path: str):
     audio.export(output_path, format="wav")
 
 
+def convert_to_mono(input_path: str, output_path: str):
+    """
+    Converts an audio file to mono and saves it to the output path.
+    Preserves the original sample rate and format.
+    """
+    audio = AudioSegment.from_file(input_path)
+    audio = audio.set_channels(1)  # Convert to mono
+    audio.export(output_path, format="wav")
+
+
 def export_to_wav(audio_data: AudioData, output_path: str):
     """Saves an AudioData object to a WAV file."""
     folder_path = os.path.dirname(output_path)

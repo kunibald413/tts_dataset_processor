@@ -19,6 +19,7 @@ from .audio_utils import (
     export_to_wav,
     load_audio_data,
     convert_to_wav,
+    convert_to_mono,
     AudioData,
 )
 from .vad import cut_audio_segments, detect_and_merge_speech_segments
@@ -386,8 +387,8 @@ def _batch_export(transcriptions: Dict[str, List[Dict]], wavs_output_dir: str) -
             base_filename = os.path.basename(vocal_path).replace("_(vocals)", "")
             final_wav_path = os.path.join(wavs_output_dir, base_filename)
             
-            # 1. Copy the final audio file
-            shutil.copy2(vocal_path, final_wav_path)
+            # 1. Copy the final audio file and convert to mono
+            convert_to_mono(vocal_path, final_wav_path)
             
             exported_files.append({
                 "filepath": final_wav_path,
