@@ -87,8 +87,6 @@ def load_audio_data(file_path: str) -> AudioData:
     """
     audio = AudioSegment.from_file(file_path)
     waveform = np.array(audio.get_array_of_samples(), dtype=np.float32)
-    # Normalize to [-1, 1] for consistency, as this is a common format
-    waveform /= np.iinfo(audio.sample_width).max if audio.sample_width > 1 else 1.0
 
     return AudioData(
         waveform=waveform,
