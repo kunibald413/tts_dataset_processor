@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import Dict, List, Iterable, Any
 from dataclasses import dataclass
 import numpy as np
-from audio_utils import AudioData
 
 from .audio_utils import (
     convert_to_16k_mono,
@@ -19,6 +18,7 @@ from .audio_utils import (
     export_to_wav,
     load_audio_data,
     convert_to_wav,
+    AudioData,
 )
 from .vad import cut_audio_segments, detect_and_merge_speech_segments
 from .asr.canary.chunked_infer import transcribe_audio_dir
