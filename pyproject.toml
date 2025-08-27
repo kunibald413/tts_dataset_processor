@@ -8,7 +8,7 @@ packages = [{ include = "tts_dataset_processor", from = "src" }]
 [tool.poetry.dependencies]
 python = ">=3.10"
 ten-vad = { git = "https://github.com/TEN-framework/ten-vad.git" }
-audio-separator = { git = "https://github.com/nomadkaraoke/python-audio-separator.git" }
+audio-separator = { git = "https://github.com/nomadkaraoke/python-audio-separator.git", extras = ["gpu"] }
 numpy = ">=2"
 scipy = "^1.11.2"
 pydub = "^0.25.1"
