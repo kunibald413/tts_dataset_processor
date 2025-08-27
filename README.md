@@ -2,6 +2,12 @@
 
 ## Installation & Usage
 
+> **Prerequisite:** This tool requires `ffmpeg`. On Debian/Ubuntu, you can install it with:
+>
+> ```bash
+> apt update && apt install ffmpeg -y
+> ```
+
 ### With Poetry (Recommended)
 
 1.  **Install:**
@@ -22,8 +28,8 @@
 
 **Note:** To install Poetry on Debian/Ubuntu, you can use `pipx`:
 ```bash
-sudo apt update
-sudo apt install pipx -y
+apt update
+apt install pipx -y
 pipx ensurepath
 pipx install poetry
 ```
