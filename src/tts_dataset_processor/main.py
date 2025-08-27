@@ -440,7 +440,6 @@ def _batch_transcribe(
         
         transcriptions = {}
         for result in asr_results:
-            # Map the ASR result file back to its original, high-quality vocal path
             processed_vocal = asr_path_map.get(result.filepath)
             if processed_vocal:
                 original_vocal_path = processed_vocal.filepath
