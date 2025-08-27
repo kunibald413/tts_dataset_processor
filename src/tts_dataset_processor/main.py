@@ -102,12 +102,12 @@ def _run_vad_segmentation(
             ten_vad_instance, data_vad, sr_vad, ten_vad_instance.hop_size, max_duration_s=max_duration
         )
         
-        # Apply smart merging to avoid many small segments (target around 20-30s for initial VAD)
         speech_timestamps = smart_merge_small_segments(
             initial_timestamps, 
             min_duration=min_duration, 
             target_duration=30.0,
-            max_merge_gap=2.0
+            max_merge_gap=2.0,
+            max_duration=max_duration
         )
         
         logger.info(f"  Initial VAD detected {len(initial_timestamps)} segments, smart-merged to {len(speech_timestamps)} segments")
@@ -209,12 +209,13 @@ def _run_final_vad_segmentation(
                 ten_vad_instance, data_vad, sr_vad, ten_vad_instance.hop_size, max_duration_s=max_duration
             )
             
-            # Apply smart merging for final segments - aim for ~70% of max duration (8s) for better utilization
+            # Apply smart merging for final segments - aim for ~80% of max duration for better utilization
             speech_timestamps = smart_merge_small_segments(
                 initial_timestamps,
                 min_duration=min_duration,
-                target_duration=max_duration * 0.8,  # Target 70% of max (8s for 11.5s max)
-                max_merge_gap=1.0  # Smaller gap for final precise segments
+                target_duration=max_duration * 0.8,  # Target 80% of max (9.2s for 11.5s max)
+                max_merge_gap=1.0,  # Smaller gap for final precise segments
+                max_duration=max_duration  # CRITICAL: Respect the 11.5s hard limit
             )
             
             logger.info(f"    Final VAD: {len(initial_timestamps)} initial → {len(speech_timestamps)} optimized segments")
