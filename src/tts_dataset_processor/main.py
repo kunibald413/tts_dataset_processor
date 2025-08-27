@@ -12,6 +12,7 @@ from .audio_utils import (
     convert_to_16k_mono,
     standardization,
     export_to_wav,
+    load_audio_data,
 )
 from .vad import cut_audio_segments, detect_and_merge_speech_segments
 from .asr.canary.chunked_infer import transcribe_audio_dir
@@ -212,18 +213,50 @@ def _batch_separate(standardized_files: List[Path], separator: Separator) -> Lis
     return vocal_files
 
 
-def _batch_transcribe_and_export(vocal_files: List[str], temp_dir: str, output_dir: str):
-    """Runs transcription and final export on a list of vocal audio files."""
-    logger.info("\n--- [Step 4&5/5] Transcribing and Exporting all vocal segments ---")
+def _batch_transcribe(vocal_files: List[str], temp_dir: str) -> Dict[str, List[Dict]]:
+    """Runs transcription on a batch of vocal files."""
+    logger.info("\n--- [Step 4/5] Transcribing all vocal segments in a single batch ---")
+    asr_input_dir = os.path.join(temp_dir, "4_asr_input")
+    if os.path.exists(asr_input_dir):
+        shutil.rmtree(asr_input_dir)
+    os.makedirs(asr_input_dir)
+
+    logger.info(f"Copying {len(vocal_files)} vocal files to a temporary directory for ASR...")
     for vocal_path in vocal_files:
-        logger.info(f"--- Processing vocal file: {os.path.basename(vocal_path)} ---")
-        asr_result = _transcribe_segment(vocal_path, temp_dir)
+        shutil.copy(vocal_path, asr_input_dir)
+
+    try:
+        # Run transcription on the entire directory at once
+        asr_results = transcribe_audio_dir(inp_audio_dir=asr_input_dir, result_to_file=False, lang="en")
+        
+        # Create a dictionary mapping the original filepath to its transcription
+        transcriptions = {}
+        for result in asr_results:
+            # The result.filepath is inside the asr_input_dir, so we map it back
+            # to the full original path by matching the basename.
+            full_original_path = next((p for p in vocal_files if os.path.basename(p) == os.path.basename(result.filepath)), None)
+
+            if full_original_path:
+                duration = librosa.get_duration(path=full_original_path)
+                transcriptions[full_original_path] = [{"start": 0, "end": duration, "text": result.text}]
+                logger.info(f"  - Transcribed '{os.path.basename(full_original_path)}': '{result.text[:50]}...'")
+
+        return transcriptions
+
+    except Exception as e:
+        logger.error(f"Error during batch transcription: {e}", exc_info=True)
+        return {}
+
+
+def _batch_export(transcriptions: Dict[str, List[Dict]], output_dir: str):
+    """Runs final export for a dictionary of transcribed audio files."""
+    logger.info("\n--- [Step 5/5] Exporting all final segments ---")
+    for vocal_path, asr_result in transcriptions.items():
         if not asr_result:
-            logger.warning(f"Transcription failed for {vocal_path}. Skipping.")
+            logger.warning(f"No transcription result for {vocal_path}. Skipping export.")
             continue
 
-        vocals_audio_data = standardization(vocal_path)
-        # Clean up the filename for the final output
+        vocals_audio_data = load_audio_data(vocal_path)
         base_filename = os.path.basename(vocal_path).replace("_(vocals)", "")
         final_filename_prefix = os.path.splitext(base_filename)[0]
         export_to_wav(
@@ -271,8 +304,11 @@ def run_pipeline(
     separator.load_model(separator_model_file_name)
     vocal_files = _batch_separate(standardized_files, separator)
 
-    # -- Step 4 & 5: Batch Transcription and Export --
-    _batch_transcribe_and_export(vocal_files, temp_dir, output_dir)
+    # -- Step 4: Batch Transcription --
+    transcriptions = _batch_transcribe(vocal_files, temp_dir)
+
+    # -- Step 5: Batch Export --
+    _batch_export(transcriptions, output_dir)
 
     logger.info("\n--- Pipeline Finished ---")
 

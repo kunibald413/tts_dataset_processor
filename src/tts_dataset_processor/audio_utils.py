@@ -81,6 +81,22 @@ def standardization(audio: Union[str, AudioSegment]) -> AudioData:
     )
 
 
+def load_audio_data(file_path: str) -> AudioData:
+    """
+    Loads an audio file and returns an AudioData object without standardization.
+    """
+    audio = AudioSegment.from_file(file_path)
+    waveform = np.array(audio.get_array_of_samples(), dtype=np.float32)
+    # Normalize to [-1, 1] for consistency, as this is a common format
+    waveform /= np.iinfo(audio.sample_width).max if audio.sample_width > 1 else 1.0
+
+    return AudioData(
+        waveform=waveform,
+        name=os.path.basename(file_path),
+        sample_rate=audio.frame_rate,
+    )
+
+
 def convert_to_16k_mono(input_file: str) -> Tuple[Optional[int], Optional[np.ndarray]]:
     """
     Converts an audio file (WAV, MP3, etc.) to 16kHz mono.
