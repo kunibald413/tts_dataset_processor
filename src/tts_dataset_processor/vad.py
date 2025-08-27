@@ -94,7 +94,7 @@ def detect_and_merge_speech_segments(
     data, 
     sr, 
     hop_size, 
-    merge_gap_s=0.300, 
+    merge_gap_s=0.250, 
     max_duration_s=None, 
     verbose=False
 ):
