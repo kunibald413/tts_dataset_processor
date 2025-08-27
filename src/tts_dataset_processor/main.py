@@ -50,6 +50,7 @@ def run_pipeline(
     output_dir: str = "output",
     min_duration: float = 2.5,
     max_duration: float = 11.5,
+    separator_model_file_name: str = "melband_roformer_big_beta4.ckpt"
 ):
     """
     Runs the full audio processing pipeline.
@@ -79,14 +80,14 @@ def run_pipeline(
 
     ten_vad_instance = TenVad(256, 0.5)
     speech_timestamps = detect_and_merge_speech_segments(
-        ten_vad_instance, data_vad, sr_vad, 256, max_duration_s=max_duration
+        ten_vad_instance, data_vad, sr_vad, ten_vad_instance.hop_size, max_duration_s=max_duration
     )
     cut_audio_segments(speech_timestamps, input_file, vad_segments_dir, min_duration)
     print(f"  - VAD produced {len(os.listdir(vad_segments_dir))} segments.")
 
     # -- Initialize Separator --
     separator = Separator(output_dir=separated_dir)
-    separator.load_model()
+    separator.load_model(separator_model_file_name)
 
     # -- Processing Loop --
     vad_segment_files = sorted(os.listdir(vad_segments_dir))
