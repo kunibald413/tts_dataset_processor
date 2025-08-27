@@ -4,6 +4,7 @@ import librosa
 import logging
 import sys
 import traceback
+import json
 from audio_separator.separator import Separator
 from pydub import AudioSegment
 from ten_vad import TenVad
@@ -448,6 +449,41 @@ def _create_metadata_csv(export_results: List[Dict], output_dir: str, speaker_na
         logger.error(f"Failed to create metadata.csv: {e}", exc_info=True)
 
 
+def _create_metadata_json(export_results: List[Dict], output_dir: str, speaker_name: str):
+    """Creates a detailed metadata.json file for the dataset."""
+    logger.info("\n--- Creating metadata.json ---")
+    json_path = os.path.join(output_dir, "metadata.json")
+    total_duration = 0
+    entries = []
+
+    for result in export_results:
+        try:
+            duration = librosa.get_duration(path=result['filepath'])
+            total_duration += duration
+            entries.append({
+                "audio_file": f"wavs/{os.path.basename(result['filepath'])}",
+                "text": result["text"],
+                "speaker_name": speaker_name,
+                "duration": round(duration, 2),
+            })
+        except Exception as e:
+            logger.error(f"Could not process {result['filepath']} for JSON metadata: {e}")
+
+    metadata = {
+        "total_duration": round(total_duration, 2),
+        "total_files": len(entries),
+        "speaker_name": speaker_name,
+        "entries": entries,
+    }
+
+    try:
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(metadata, f, indent=4)
+        logger.info(f"Successfully created metadata file at: {json_path}")
+    except Exception as e:
+        logger.error(f"Failed to create metadata.json: {e}", exc_info=True)
+
+
 def _print_summary_report(all_failures: List[FailedFile], final_success_count: int):
     """Prints a summary of the pipeline run."""
     logger.info("\n--- Pipeline Summary Report ---")
@@ -536,6 +572,7 @@ def run_pipeline(
     # -- Final Step: Create Metadata CSV --
     if export_result.successful_outputs:
         _create_metadata_csv(export_result.successful_outputs, output_dir, speaker_name)
+        _create_metadata_json(export_result.successful_outputs, output_dir, speaker_name)
 
     logger.info("\n--- Pipeline Finished ---")
     _print_summary_report(all_failures, len(export_result.successful_outputs))
