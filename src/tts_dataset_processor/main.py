@@ -68,6 +68,7 @@ def _setup_directories(temp_dir: str, output_dir: str) -> Dict[str, str]:
         "vad": os.path.join(temp_dir, "1_vad_segments"),
         "standardized": os.path.join(temp_dir, "2_standardized"),
         "separated": os.path.join(temp_dir, "3_separated"),
+        "vad_final": os.path.join(temp_dir, "4_vad_final"),
     }
     for d in dirs.values():
         os.makedirs(d, exist_ok=True)
@@ -81,7 +82,7 @@ def _run_vad_segmentation(
     input_file: str, vad_segments_dir: str, min_duration: float, max_duration: float
 ) -> StepResult:
     """Runs VAD on the input file and saves segments to a directory."""
-    logger.info("[Step 1/5] Running VAD segmentation...")
+    logger.info("[Step 1/6] Running initial VAD segmentation...")
     try:
         sr_vad, data_vad = convert_to_16k_mono(input_file)
         if data_vad is None:
@@ -109,9 +110,48 @@ def _run_vad_segmentation(
         return StepResult(successful_outputs=[], failures=[failure])
 
 
+def _run_final_vad_segmentation(
+    vocal_files: List[str], vad_final_dir: str, min_duration: float, max_duration: float
+) -> StepResult:
+    """Runs VAD on separated vocal files to create training-friendly segments."""
+    logger.info("\n--- [Step 4/6] Running final VAD segmentation on separated vocals ---")
+    all_final_segments = []
+    failures = []
+    
+    for vocal_file in vocal_files:
+        try:
+            logger.info(f"  - Processing {os.path.basename(vocal_file)}")
+            sr_vad, data_vad = convert_to_16k_mono(vocal_file)
+            if data_vad is None:
+                raise ValueError("VAD pre-processing failed (could not load audio).")
+
+            ten_vad_instance = TenVad(256, 0.5)
+            speech_timestamps = detect_and_merge_speech_segments(
+                ten_vad_instance, data_vad, sr_vad, ten_vad_instance.hop_size, max_duration_s=max_duration
+            )
+            
+            # Use the vocal filename stem as a prefix for final VAD segments
+            file_stem = Path(vocal_file).stem
+            cut_audio_segments(
+                speech_timestamps, vocal_file, vad_final_dir, min_duration, output_prefix=file_stem
+            )
+
+            segment_files = sorted([f for f in os.listdir(vad_final_dir) if f.startswith(file_stem)])
+            logger.info(f"    Final VAD produced {len(segment_files)} segments.")
+            output_paths = [os.path.join(vad_final_dir, f) for f in segment_files]
+            all_final_segments.extend(output_paths)
+
+        except Exception as e:
+            logger.error(f"Final VAD failed for {vocal_file}: {e}", exc_info=True)
+            failure = FailedFile(filepath=vocal_file, reason=str(e))
+            failures.append(failure)
+
+    return StepResult(successful_outputs=all_final_segments, failures=failures)
+
+
 def _transcribe_segment(vocals_path: str, temp_dir: str) -> List[Dict]:
     """Transcribes a single audio file using the Canary ASR model."""
-    logger.info("[Step 4/5] Transcribing vocals...")
+    logger.info("[Step 5/7] Transcribing vocals...")
     asr_input_dir = os.path.join(temp_dir, "4_asr_input")  # Subdir for this task
     if os.path.exists(asr_input_dir):
         shutil.rmtree(asr_input_dir)
@@ -182,7 +222,7 @@ def _get_audio_files_from_input(input_path: str) -> List[str]:
 
 def _batch_standardize(vad_segment_paths: List[str], standardized_dir: str) -> StepResult:
     """Runs standardization on a list of audio files."""
-    logger.info("\n--- [Step 2/5] Standardizing all segments ---")
+    logger.info("\n--- [Step 2/7] Standardizing all segments ---")
     standardized_files = []
     failures = []
     for segment_path in vad_segment_paths:
@@ -205,7 +245,7 @@ def _batch_separate(standardized_files: List[Path], separator: Separator, temp_d
     Runs vocal separation on a list of standardized audio files,
     grouping short files together to improve separation quality.
     """
-    logger.info("\n--- [Step 3/5] Separating vocals for all segments (with chunking) ---")
+    logger.info("\n--- [Step 3/7] Separating vocals for all segments (with chunking) ---")
     
     # Create a temporary directory for the concatenated audio chunks
     concatenated_dir = os.path.join(temp_dir, "3a_concatenated")
@@ -279,7 +319,7 @@ def _batch_prepare_for_asr(vocal_files: List[str], temp_dir: str) -> Dict[str, s
     Ensures all vocal files are 16kHz mono WAV for the ASR model.
     Returns a mapping of {asr_input_path: original_vocal_path}.
     """
-    logger.info("\n--- [Step 4/6] Preparing files for ASR ---")
+    logger.info("\n--- [Step 5/7] Preparing files for ASR ---")
     asr_input_dir = os.path.join(temp_dir, "4_asr_input")
     if os.path.exists(asr_input_dir):
         shutil.rmtree(asr_input_dir)
@@ -309,7 +349,7 @@ def _batch_transcribe(
     asr_path_map: Dict[str, str], temp_dir: str, asr_model_name: str
 ) -> StepResult:
     """Runs transcription on a batch of prepared vocal files."""
-    logger.info(f"\n--- [Step 5/6] Transcribing all vocal segments in a single batch using {asr_model_name} ---")
+    logger.info(f"\n--- [Step 6/7] Transcribing all vocal segments in a single batch using {asr_model_name} ---")
     
     asr_input_files = list(asr_path_map.keys())
     if not asr_input_files:
@@ -364,7 +404,7 @@ def _batch_export(transcriptions: Dict[str, List[Dict]], wavs_output_dir: str) -
     Exports the final audio files and their transcriptions. The final filename is
     derived from the original source file and VAD segment index.
     """
-    logger.info("\n--- [Step 6/6] Exporting all final segments ---")
+    logger.info("\n--- [Step 7/7] Exporting all final segments ---")
     exported_files = []
     failures = []
     
@@ -496,7 +536,7 @@ def run_pipeline(
 ):
     """
     Runs the full audio processing pipeline in batch stages.
-    1. VAD Segmentation -> 2. Standardization -> 3. Separation -> 4. ASR -> 5. Export
+    1. Initial VAD (60s max) -> 2. Standardization -> 3. Separation -> 4. Final VAD (11.5s max) -> 5. ASR -> 6. Export
     """
     logger.info(f"--- Starting Pipeline for Input: {input_path} ---")
     all_failures = []
@@ -511,12 +551,13 @@ def run_pipeline(
     wavs_output_dir = os.path.join(output_dir, "wavs")
     os.makedirs(wavs_output_dir, exist_ok=True)
 
-    # -- Step 1: VAD Segmentation (run for each input file) --
+    # -- Step 1: Initial VAD Segmentation (run for each input file, 60s max for efficiency) --
     all_vad_segment_paths = []
+    initial_max_duration = 60.0  # Use 60s for initial VAD to cut down on silence
     for audio_file in audio_files:
-        logger.info(f"\n--- Running VAD on source file: {os.path.basename(audio_file)} ---")
+        logger.info(f"\n--- Running initial VAD on source file: {os.path.basename(audio_file)} ---")
         vad_result = _run_vad_segmentation(
-            audio_file, dirs["vad"], min_duration, max_duration
+            audio_file, dirs["vad"], min_duration, initial_max_duration
         )
         all_failures.extend(vad_result.failures)
         all_vad_segment_paths.extend(vad_result.successful_outputs)
@@ -544,14 +585,24 @@ def run_pipeline(
         _print_summary_report(all_failures, 0)
         return
 
-    # -- Step 4: Prepare files for ASR --
-    asr_path_map = _batch_prepare_for_asr(separate_result.successful_outputs, temp_dir)
+    # -- Step 4: Final VAD Segmentation (training-friendly segments) --
+    final_vad_result = _run_final_vad_segmentation(
+        separate_result.successful_outputs, dirs["vad_final"], min_duration, max_duration
+    )
+    all_failures.extend(final_vad_result.failures)
+    if not final_vad_result.successful_outputs:
+        logger.error("No segments were produced by final VAD. Halting pipeline.")
+        _print_summary_report(all_failures, 0)
+        return
+
+    # -- Step 5: Prepare files for ASR --
+    asr_path_map = _batch_prepare_for_asr(final_vad_result.successful_outputs, temp_dir)
     if not asr_path_map:
         logger.error("No files could be prepared for ASR. Halting pipeline.")
         _print_summary_report(all_failures, 0)
         return
 
-    # -- Step 5: Batch Transcription --
+    # -- Step 6: Batch Transcription --
     transcribe_result = _batch_transcribe(asr_path_map, temp_dir, asr_model_name)
     all_failures.extend(transcribe_result.failures)
     if not transcribe_result.successful_outputs:
@@ -559,7 +610,7 @@ def run_pipeline(
         _print_summary_report(all_failures, 0)
         return
 
-    # -- Step 6: Batch Export --
+    # -- Step 7: Batch Export --
     export_result = _batch_export(transcribe_result.successful_outputs, wavs_output_dir)
     all_failures.extend(export_result.failures)
 
