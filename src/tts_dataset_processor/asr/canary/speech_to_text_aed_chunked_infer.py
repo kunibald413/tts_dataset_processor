@@ -47,7 +47,7 @@ import contextlib
 import copy
 import glob
 import os
-from dataclasses import dataclass, is_dataclass
+from dataclasses import dataclass, is_dataclass, field
 from typing import Optional, Tuple, List
 
 from .canary_manifest_utils import read_manifest
@@ -105,7 +105,7 @@ class TranscriptionConfig:
     )
 
     # Decoding strategy for MultitaskAED models
-    decoding: MultiTaskDecodingConfig = MultiTaskDecodingConfig()
+    decoding: MultiTaskDecodingConfig = field(default_factory=MultiTaskDecodingConfig)
 
     # Set `cuda` to int to define CUDA device. If 'None', will look for CUDA
     # device anyway, and do inference on CPU only if CUDA device is not found.
