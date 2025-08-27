@@ -14,6 +14,12 @@
     poetry run python -m tts_dataset_processor.main
     ```
 
+4. update deps if changed:
+    ```bash
+    poetry update
+    ```
+
+
 **Note:** To install Poetry on Debian/Ubuntu, you can use `pipx`:
 ```bash
 sudo apt update
