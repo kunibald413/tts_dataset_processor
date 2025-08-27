@@ -46,6 +46,14 @@ class FailedFile:
 
 
 @dataclass
+class ProcessedFile:
+    """Represents a file with its original source tracking."""
+    
+    filepath: str
+    original_source: str
+
+
+@dataclass
 class StepResult:
     """Holds the results of a pipeline step."""
 
@@ -83,7 +91,7 @@ def _run_vad_segmentation(
     input_file: str, vad_segments_dir: str, min_duration: float, max_duration: float
 ) -> StepResult:
     """Runs VAD on the input file and saves segments to a directory."""
-    logger.info("[Step 1/6] Running initial VAD segmentation...")
+    logger.info("[Step 1/7] Running initial VAD segmentation...")
     try:
         sr_vad, data_vad = convert_to_16k_mono(input_file)
         if data_vad is None:
@@ -102,8 +110,14 @@ def _run_vad_segmentation(
 
         segment_files = sorted([f for f in os.listdir(vad_segments_dir) if f.startswith(file_stem)])
         logger.info(f"VAD produced {len(segment_files)} segments for {os.path.basename(input_file)}.")
-        output_paths = [os.path.join(vad_segments_dir, f) for f in segment_files]
-        return StepResult(successful_outputs=output_paths, failures=[])
+        
+        # Create ProcessedFile objects that track the original source
+        original_source = Path(input_file).stem
+        processed_files = [
+            ProcessedFile(filepath=os.path.join(vad_segments_dir, f), original_source=original_source)
+            for f in segment_files
+        ]
+        return StepResult(successful_outputs=processed_files, failures=[])
 
     except Exception as e:
         logger.error(f"VAD step failed entirely: {e}", exc_info=True)
@@ -112,24 +126,21 @@ def _run_vad_segmentation(
 
 
 def _concatenate_segments_by_source(
-    vocal_files: List[str], concat_dir: str, silence_duration_ms: int = 500
+    vocal_files: List[ProcessedFile], concat_dir: str, silence_duration_ms: int = 500
 ) -> StepResult:
     """Concatenates separated vocal segments back by original source file with silence padding."""
     logger.info("\n--- [Step 4a/7] Concatenating separated segments by original source ---")
     concatenated_files = []
     failures = []
     
-    # Group vocal files by their original source (extract from filename pattern)
+    # Group vocal files by their original source (now tracked explicitly)
     source_groups = {}
-    for vocal_file in vocal_files:
-        # Extract original source name from vocal filename (e.g., "source_001_segment_003_(vocals).wav" -> "source_001")
-        basename = os.path.basename(vocal_file)
-        # Remove the segment part and vocal suffix to get source name
-        source_name = basename.split("_segment_")[0] if "_segment_" in basename else basename.split("_(vocals)")[0]
+    for processed_file in vocal_files:
+        source_name = processed_file.original_source
         
         if source_name not in source_groups:
             source_groups[source_name] = []
-        source_groups[source_name].append(vocal_file)
+        source_groups[source_name].append(processed_file.filepath)
     
     # Process each source group
     for source_name, segments in source_groups.items():
@@ -153,11 +164,16 @@ def _concatenate_segments_by_source(
                     combined_audio += silence + segment_audio
             
             # Export concatenated file
+            if combined_audio is None:
+                raise ValueError(f"No audio segments found for source {source_name}")
+            
             concat_filename = f"{source_name}_vocals_concat.wav"
             concat_path = os.path.join(concat_dir, concat_filename)
             combined_audio.export(concat_path, format="wav")
             
-            concatenated_files.append(concat_path)
+            # Create ProcessedFile to track original source
+            processed_concat = ProcessedFile(filepath=concat_path, original_source=source_name)
+            concatenated_files.append(processed_concat)
             logger.info(f"    Created concatenated file: {concat_filename}")
             
         except Exception as e:
@@ -169,16 +185,19 @@ def _concatenate_segments_by_source(
 
 
 def _run_final_vad_segmentation(
-    concatenated_files: List[str], vad_final_dir: str, min_duration: float, max_duration: float
+    concatenated_files: List[ProcessedFile], vad_final_dir: str, min_duration: float, max_duration: float
 ) -> StepResult:
     """Runs VAD on concatenated vocal files to create training-friendly segments."""
     logger.info("\n--- [Step 4b/7] Running final VAD segmentation on concatenated vocals ---")
     all_final_segments = []
     failures = []
     
-    for concat_file in concatenated_files:
+    for processed_concat in concatenated_files:
+        concat_file = processed_concat.filepath
+        original_source = processed_concat.original_source
+        
         try:
-            logger.info(f"  - Processing {os.path.basename(concat_file)}")
+            logger.info(f"  - Processing {os.path.basename(concat_file)} (source: {original_source})")
             sr_vad, data_vad = convert_to_16k_mono(concat_file)
             if data_vad is None:
                 raise ValueError("VAD pre-processing failed (could not load audio).")
@@ -196,8 +215,12 @@ def _run_final_vad_segmentation(
 
             segment_files = sorted([f for f in os.listdir(vad_final_dir) if f.startswith(file_stem)])
             logger.info(f"    Final VAD produced {len(segment_files)} segments.")
-            output_paths = [os.path.join(vad_final_dir, f) for f in segment_files]
-            all_final_segments.extend(output_paths)
+            
+            # Create ProcessedFile objects that preserve the original source
+            for segment_file in segment_files:
+                segment_path = os.path.join(vad_final_dir, segment_file)
+                processed_segment = ProcessedFile(filepath=segment_path, original_source=original_source)
+                all_final_segments.append(processed_segment)
 
         except Exception as e:
             logger.error(f"Final VAD failed for {concat_file}: {e}", exc_info=True)
@@ -278,18 +301,23 @@ def _get_audio_files_from_input(input_path: str) -> List[str]:
 # --- Batch Processing Functions ---
 
 
-def _batch_standardize(vad_segment_paths: List[str], standardized_dir: str) -> StepResult:
+def _batch_standardize(vad_segments: List[ProcessedFile], standardized_dir: str) -> StepResult:
     """Runs standardization on a list of audio files."""
     logger.info("\n--- [Step 2/7] Standardizing all segments ---")
     standardized_files = []
     failures = []
-    for segment_path in vad_segment_paths:
+    for processed_segment in vad_segments:
+        segment_path = processed_segment.filepath
+        original_source = processed_segment.original_source
         try:
             segment_filename = os.path.basename(segment_path)
             standardized_data = standardization(segment_path)
             standardized_file_path = os.path.join(standardized_dir, segment_filename)
             export_to_wav(standardized_data, standardized_file_path)
-            standardized_files.append(Path(standardized_file_path))
+            
+            # Create ProcessedFile to preserve original source tracking
+            processed_standardized = ProcessedFile(filepath=str(standardized_file_path), original_source=original_source)
+            standardized_files.append(processed_standardized)
             logger.info(f"  - Standardized: {standardized_file_path}")
         except Exception as e:
             logger.error(f"Failed to standardize {segment_path}: {e}", exc_info=True)
@@ -298,7 +326,7 @@ def _batch_standardize(vad_segment_paths: List[str], standardized_dir: str) -> S
     return StepResult(successful_outputs=standardized_files, failures=failures)
 
 
-def _batch_separate(standardized_files: List[Path], separator: Separator, temp_dir: str) -> StepResult:
+def _batch_separate(standardized_files: List[ProcessedFile], separator: Separator, temp_dir: str) -> StepResult:
     """
     Runs vocal separation on a list of standardized audio files,
     grouping short files together to improve separation quality.
@@ -311,9 +339,13 @@ def _batch_separate(standardized_files: List[Path], separator: Separator, temp_d
 
     vocal_files = []
     failures = []
-    file_chunks = _group_into_chunks(standardized_files, 5)
+    
+    # Convert ProcessedFile objects to paths for chunking, but keep metadata
+    file_paths_with_metadata = [(pf.filepath, pf.original_source) for pf in standardized_files]
+    file_chunks = _group_into_chunks([fp for fp, _ in file_paths_with_metadata], 5)
+    metadata_chunks = _group_into_chunks([md for _, md in file_paths_with_metadata], 5)
 
-    for i, chunk in enumerate(file_chunks):
+    for i, (chunk, metadata_chunk) in enumerate(zip(file_chunks, metadata_chunks)):
         if not chunk:
             continue
 
@@ -348,7 +380,7 @@ def _batch_separate(standardized_files: List[Path], separator: Separator, temp_d
             # --- Split the separated vocals back into individual files ---
             separated_vocals_audio = AudioSegment.from_file(vocals_path)
             start_ms = 0
-            for j, duration_ms in enumerate(durations_ms):
+            for j, (duration_ms, original_source) in enumerate(zip(durations_ms, metadata_chunk)):
                 end_ms = start_ms + duration_ms
                 split_vocal = separated_vocals_audio[start_ms:end_ms]
                 
@@ -357,14 +389,17 @@ def _batch_separate(standardized_files: List[Path], separator: Separator, temp_d
                 split_vocal_path = os.path.join(separator.output_dir, split_vocal_filename)
                 
                 split_vocal.export(split_vocal_path, format="wav")
-                vocal_files.append(split_vocal_path)
+                
+                # Create ProcessedFile to preserve original source tracking
+                processed_vocal = ProcessedFile(filepath=split_vocal_path, original_source=original_source)
+                vocal_files.append(processed_vocal)
                 logger.info(f"    - Split and saved separated vocal to: {split_vocal_path}")
                 
                 start_ms = end_ms
 
         except Exception as e:
             logger.error(f"Error processing chunk {i}: {e}", exc_info=True)
-            for file_in_chunk in chunk:
+            for file_in_chunk, source in zip(chunk, metadata_chunk):
                 failures.append(
                     FailedFile(filepath=str(file_in_chunk), reason=f"Failed during separation in chunk {i}: {e}")
                 )
@@ -372,7 +407,7 @@ def _batch_separate(standardized_files: List[Path], separator: Separator, temp_d
     return StepResult(successful_outputs=vocal_files, failures=failures)
 
 
-def _batch_prepare_for_asr(vocal_files: List[str], temp_dir: str) -> Dict[str, str]:
+def _batch_prepare_for_asr(vocal_files: List[ProcessedFile], temp_dir: str) -> Dict[str, ProcessedFile]:
     """
     Ensures all vocal files are 16kHz mono WAV for the ASR model.
     Returns a mapping of {asr_input_path: original_vocal_path}.
@@ -384,7 +419,8 @@ def _batch_prepare_for_asr(vocal_files: List[str], temp_dir: str) -> Dict[str, s
     os.makedirs(asr_input_dir)
 
     path_map = {}
-    for vocal_path in vocal_files:
+    for processed_vocal in vocal_files:
+        vocal_path = processed_vocal.filepath
         try:
             audio = AudioSegment.from_file(vocal_path)
             asr_ready_path = os.path.join(asr_input_dir, os.path.basename(vocal_path))
@@ -395,7 +431,9 @@ def _batch_prepare_for_asr(vocal_files: List[str], temp_dir: str) -> Dict[str, s
             else:
                 shutil.copy2(vocal_path, asr_ready_path)
             
-            path_map[asr_ready_path] = vocal_path
+            # Create ProcessedFile for the ASR-ready file that preserves original source
+            asr_ready_processed = ProcessedFile(filepath=asr_ready_path, original_source=processed_vocal.original_source)
+            path_map[asr_ready_path] = asr_ready_processed
         except Exception as e:
             logger.error(f"Failed to prepare {vocal_path} for ASR: {e}", exc_info=True)
             # This file will be skipped as it won't be in the path_map
@@ -404,7 +442,7 @@ def _batch_prepare_for_asr(vocal_files: List[str], temp_dir: str) -> Dict[str, s
 
 
 def _batch_transcribe(
-    asr_path_map: Dict[str, str], temp_dir: str, asr_model_name: str
+    asr_path_map: Dict[str, ProcessedFile], temp_dir: str, asr_model_name: str
 ) -> StepResult:
     """Runs transcription on a batch of prepared vocal files."""
     logger.info(f"\n--- [Step 6/7] Transcribing all vocal segments in a single batch using {asr_model_name} ---")
@@ -427,14 +465,15 @@ def _batch_transcribe(
         transcriptions = {}
         for result in asr_results:
             # Map the ASR result file back to its original, high-quality vocal path
-            original_vocal_path = asr_path_map.get(result.filepath)
-            if original_vocal_path:
+            processed_vocal = asr_path_map.get(result.filepath)
+            if processed_vocal:
+                original_vocal_path = processed_vocal.filepath
                 duration = librosa.get_duration(path=original_vocal_path)
                 transcriptions[original_vocal_path] = [{"start": 0, "end": duration, "text": result.text}]
                 logger.info(f"  - Transcribed '{os.path.basename(original_vocal_path)}': '{result.text[:50]}...'")
 
         failures = []
-        original_vocal_paths = list(asr_path_map.values())
+        original_vocal_paths = [pf.filepath for pf in asr_path_map.values()]
         for vocal_file in original_vocal_paths:
             if vocal_file not in transcriptions:
                 failures.append(FailedFile(filepath=vocal_file, reason="ASR did not return a transcription for this file."))
@@ -447,12 +486,13 @@ def _batch_transcribe(
         detailed_reason = f"Batch transcription failed: {e}\n{tb_str}"
         
         failures = []
-        original_vocal_paths = list(asr_path_map.values())
-        if original_vocal_paths:
-            failures.append(FailedFile(filepath=original_vocal_paths[0], reason=detailed_reason))
-            simple_reason = f"Batch transcription failed (see traceback for {os.path.basename(original_vocal_paths[0])})"
-            for p in original_vocal_paths[1:]:
-                failures.append(FailedFile(filepath=p, reason=simple_reason))
+        processed_vocals = list(asr_path_map.values())
+        if processed_vocals:
+            first_vocal_path = processed_vocals[0].filepath
+            failures.append(FailedFile(filepath=first_vocal_path, reason=detailed_reason))
+            simple_reason = f"Batch transcription failed (see traceback for {os.path.basename(first_vocal_path)})"
+            for pv in processed_vocals[1:]:
+                failures.append(FailedFile(filepath=pv.filepath, reason=simple_reason))
         
         return StepResult(successful_outputs={}, failures=failures)
 
