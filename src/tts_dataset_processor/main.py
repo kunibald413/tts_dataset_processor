@@ -68,7 +68,8 @@ def _setup_directories(temp_dir: str, output_dir: str) -> Dict[str, str]:
         "vad": os.path.join(temp_dir, "1_vad_segments"),
         "standardized": os.path.join(temp_dir, "2_standardized"),
         "separated": os.path.join(temp_dir, "3_separated"),
-        "vad_final": os.path.join(temp_dir, "4_vad_final"),
+        "concatenated": os.path.join(temp_dir, "4_concatenated"),
+        "vad_final": os.path.join(temp_dir, "5_vad_final"),
     }
     for d in dirs.values():
         os.makedirs(d, exist_ok=True)
@@ -110,18 +111,75 @@ def _run_vad_segmentation(
         return StepResult(successful_outputs=[], failures=[failure])
 
 
-def _run_final_vad_segmentation(
-    vocal_files: List[str], vad_final_dir: str, min_duration: float, max_duration: float
+def _concatenate_segments_by_source(
+    vocal_files: List[str], concat_dir: str, silence_duration_ms: int = 500
 ) -> StepResult:
-    """Runs VAD on separated vocal files to create training-friendly segments."""
-    logger.info("\n--- [Step 4/6] Running final VAD segmentation on separated vocals ---")
+    """Concatenates separated vocal segments back by original source file with silence padding."""
+    logger.info("\n--- [Step 4a/7] Concatenating separated segments by original source ---")
+    concatenated_files = []
+    failures = []
+    
+    # Group vocal files by their original source (extract from filename pattern)
+    source_groups = {}
+    for vocal_file in vocal_files:
+        # Extract original source name from vocal filename (e.g., "source_001_segment_003_(vocals).wav" -> "source_001")
+        basename = os.path.basename(vocal_file)
+        # Remove the segment part and vocal suffix to get source name
+        source_name = basename.split("_segment_")[0] if "_segment_" in basename else basename.split("_(vocals)")[0]
+        
+        if source_name not in source_groups:
+            source_groups[source_name] = []
+        source_groups[source_name].append(vocal_file)
+    
+    # Process each source group
+    for source_name, segments in source_groups.items():
+        try:
+            logger.info(f"  - Concatenating {len(segments)} segments for {source_name}")
+            
+            # Sort segments to maintain order
+            segments.sort()
+            
+            # Load and concatenate segments with silence
+            combined_audio = None
+            silence = AudioSegment.silent(duration=silence_duration_ms)
+            
+            for i, segment_file in enumerate(segments):
+                segment_audio = AudioSegment.from_file(segment_file)
+                
+                if combined_audio is None:
+                    combined_audio = segment_audio
+                else:
+                    # Add silence then the next segment
+                    combined_audio += silence + segment_audio
+            
+            # Export concatenated file
+            concat_filename = f"{source_name}_vocals_concat.wav"
+            concat_path = os.path.join(concat_dir, concat_filename)
+            combined_audio.export(concat_path, format="wav")
+            
+            concatenated_files.append(concat_path)
+            logger.info(f"    Created concatenated file: {concat_filename}")
+            
+        except Exception as e:
+            logger.error(f"Failed to concatenate segments for {source_name}: {e}", exc_info=True)
+            failure = FailedFile(filepath=source_name, reason=str(e))
+            failures.append(failure)
+    
+    return StepResult(successful_outputs=concatenated_files, failures=failures)
+
+
+def _run_final_vad_segmentation(
+    concatenated_files: List[str], vad_final_dir: str, min_duration: float, max_duration: float
+) -> StepResult:
+    """Runs VAD on concatenated vocal files to create training-friendly segments."""
+    logger.info("\n--- [Step 4b/7] Running final VAD segmentation on concatenated vocals ---")
     all_final_segments = []
     failures = []
     
-    for vocal_file in vocal_files:
+    for concat_file in concatenated_files:
         try:
-            logger.info(f"  - Processing {os.path.basename(vocal_file)}")
-            sr_vad, data_vad = convert_to_16k_mono(vocal_file)
+            logger.info(f"  - Processing {os.path.basename(concat_file)}")
+            sr_vad, data_vad = convert_to_16k_mono(concat_file)
             if data_vad is None:
                 raise ValueError("VAD pre-processing failed (could not load audio).")
 
@@ -130,10 +188,10 @@ def _run_final_vad_segmentation(
                 ten_vad_instance, data_vad, sr_vad, ten_vad_instance.hop_size, max_duration_s=max_duration
             )
             
-            # Use the vocal filename stem as a prefix for final VAD segments
-            file_stem = Path(vocal_file).stem
+            # Use the concatenated filename stem as a prefix for final VAD segments
+            file_stem = Path(concat_file).stem
             cut_audio_segments(
-                speech_timestamps, vocal_file, vad_final_dir, min_duration, output_prefix=file_stem
+                speech_timestamps, concat_file, vad_final_dir, min_duration, output_prefix=file_stem
             )
 
             segment_files = sorted([f for f in os.listdir(vad_final_dir) if f.startswith(file_stem)])
@@ -142,8 +200,8 @@ def _run_final_vad_segmentation(
             all_final_segments.extend(output_paths)
 
         except Exception as e:
-            logger.error(f"Final VAD failed for {vocal_file}: {e}", exc_info=True)
-            failure = FailedFile(filepath=vocal_file, reason=str(e))
+            logger.error(f"Final VAD failed for {concat_file}: {e}", exc_info=True)
+            failure = FailedFile(filepath=concat_file, reason=str(e))
             failures.append(failure)
 
     return StepResult(successful_outputs=all_final_segments, failures=failures)
@@ -585,9 +643,19 @@ def run_pipeline(
         _print_summary_report(all_failures, 0)
         return
 
-    # -- Step 4: Final VAD Segmentation (training-friendly segments) --
+    # -- Step 4a: Concatenate segments by original source --
+    concat_result = _concatenate_segments_by_source(
+        separate_result.successful_outputs, dirs["concatenated"]
+    )
+    all_failures.extend(concat_result.failures)
+    if not concat_result.successful_outputs:
+        logger.error("No concatenated files were created. Halting pipeline.")
+        _print_summary_report(all_failures, 0)
+        return
+
+    # -- Step 4b: Final VAD Segmentation (training-friendly segments) --
     final_vad_result = _run_final_vad_segmentation(
-        separate_result.successful_outputs, dirs["vad_final"], min_duration, max_duration
+        concat_result.successful_outputs, dirs["vad_final"], min_duration, max_duration
     )
     all_failures.extend(final_vad_result.failures)
     if not final_vad_result.successful_outputs:
