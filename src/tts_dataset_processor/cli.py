@@ -16,9 +16,16 @@ def main():
         required=True,
         help="Path to the input audio file to process.",
     )
+    parser.add_argument(
+        "-o",
+        "--output",
+        type=str,
+        default="output",
+        help="Path to the output directory. Defaults to 'output'.",
+    )
     args = parser.parse_args()
 
-    run_pipeline(input_file=args.input)
+    run_pipeline(input_file=args.input, output_dir=args.output)
 
 
 if __name__ == "__main__":

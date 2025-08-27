@@ -515,7 +515,7 @@ def run_pipeline(
     input_file: str,
     temp_dir: str = "tmp",
     output_dir: str = "output",
-    min_duration: float = 2.5,
+    min_duration: float = 2.3,
     max_duration: float = 11.5,
     separator_model_file_name: str = "melband_roformer_big_beta4.ckpt",
     speaker_name: str = "coqui",
