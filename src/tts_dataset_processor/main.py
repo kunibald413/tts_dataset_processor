@@ -88,7 +88,8 @@ def _setup_directories(temp_dir: str, output_dir: str) -> Dict[str, str]:
 
 
 def _run_vad_segmentation(
-    input_file: str, vad_segments_dir: str, min_duration: float, max_duration: float
+    input_file: str, vad_segments_dir: str, min_duration: float, max_duration: float,
+    target_duration: float, merge_gap: float
 ) -> StepResult:
     """Runs VAD on the input file and saves segments to a directory."""
     logger.info("[Step 1/7] Running initial VAD segmentation...")
@@ -105,8 +106,8 @@ def _run_vad_segmentation(
         speech_timestamps = smart_merge_small_segments(
             initial_timestamps, 
             min_duration=min_duration, 
-            target_duration=30.0,
-            max_merge_gap=2.0,
+            target_duration=target_duration,
+            max_merge_gap=merge_gap,
             max_duration=max_duration
         )
         
@@ -187,7 +188,8 @@ def _concatenate_segments_by_source(
 
 
 def _run_final_vad_segmentation(
-    concatenated_files: List[ProcessedFile], vad_final_dir: str, min_duration: float, max_duration: float
+    concatenated_files: List[ProcessedFile], vad_final_dir: str, min_duration: float, max_duration: float,
+    target_duration: float, merge_gap: float
 ) -> StepResult:
     """Runs VAD on concatenated vocal files to create training-friendly segments."""
     logger.info("\n--- [Step 4b/7] Running final VAD segmentation on concatenated vocals ---")
@@ -209,12 +211,11 @@ def _run_final_vad_segmentation(
                 ten_vad_instance, data_vad, sr_vad, ten_vad_instance.hop_size, max_duration_s=max_duration
             )
             
-            # Apply smart merging for final segments - aim for ~80% of max duration for better utilization
             speech_timestamps = smart_merge_small_segments(
                 initial_timestamps,
                 min_duration=min_duration,
-                target_duration=max_duration * 0.8,  # Target 80% of max (9.2s for 11.5s max)
-                max_merge_gap=0.250,
+                target_duration=target_duration,
+                max_merge_gap=merge_gap,
                 max_duration=max_duration
             )
             
@@ -601,6 +602,11 @@ def run_pipeline(
     separator_model_file_name: str = "melband_roformer_big_beta4.ckpt",
     speaker_name: str = "coqui",
     asr_model_name: str = "nvidia/canary-1b-flash",
+    initial_vad_max: float = 60.0,
+    initial_target_duration: float = 30.0,
+    initial_merge_gap: float = 2.0,
+    final_target_ratio: float = 0.8,
+    final_merge_gap: float = 0.250,
 ):
     """
     Runs the full audio processing pipeline in batch stages.
@@ -619,13 +625,12 @@ def run_pipeline(
     wavs_output_dir = os.path.join(output_dir, "wavs")
     os.makedirs(wavs_output_dir, exist_ok=True)
 
-    # -- Step 1: Initial VAD Segmentation (run for each input file, 60s max for efficiency) --
     all_vad_segment_paths = []
-    initial_max_duration = 60.0  # Use 60s for initial VAD to cut down on silence
     for audio_file in audio_files:
         logger.info(f"\n--- Running initial VAD on source file: {os.path.basename(audio_file)} ---")
         vad_result = _run_vad_segmentation(
-            audio_file, dirs["vad"], min_duration, initial_max_duration
+            audio_file, dirs["vad"], min_duration, initial_vad_max, 
+            initial_target_duration, initial_merge_gap
         )
         all_failures.extend(vad_result.failures)
         all_vad_segment_paths.extend(vad_result.successful_outputs)
@@ -663,9 +668,9 @@ def run_pipeline(
         _print_summary_report(all_failures, 0)
         return
 
-    # -- Step 4b: Final VAD Segmentation (training-friendly segments) --
     final_vad_result = _run_final_vad_segmentation(
-        concat_result.successful_outputs, dirs["vad_final"], min_duration, max_duration
+        concat_result.successful_outputs, dirs["vad_final"], min_duration, max_duration,
+        max_duration * final_target_ratio, final_merge_gap
     )
     all_failures.extend(final_vad_result.failures)
     if not final_vad_result.successful_outputs:
