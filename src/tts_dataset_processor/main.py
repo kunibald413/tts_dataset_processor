@@ -398,7 +398,7 @@ def _batch_transcribe(asr_path_map: Dict[str, str], temp_dir: str) -> StepResult
         return StepResult(successful_outputs={}, failures=failures)
 
 
-def _batch_export(transcriptions: Dict[str, List[Dict]], output_dir: str) -> StepResult:
+def _batch_export(transcriptions: Dict[str, List[Dict]], wavs_output_dir: str) -> StepResult:
     """
     Exports the final audio files and their transcriptions.
     This step simply copies the high-quality vocal files to the output directory
@@ -414,25 +414,38 @@ def _batch_export(transcriptions: Dict[str, List[Dict]], output_dir: str) -> Ste
 
             # Determine the final name and paths
             base_filename = os.path.basename(vocal_path).replace("_(vocals)", "")
-            final_wav_path = os.path.join(output_dir, base_filename)
-            final_txt_path = os.path.splitext(final_wav_path)[0] + ".txt"
+            final_wav_path = os.path.join(wavs_output_dir, base_filename)
             
             # 1. Copy the final audio file
             shutil.copy2(vocal_path, final_wav_path)
-            exported_files.append(final_wav_path)
+            exported_files.append({"filepath": final_wav_path, "text": asr_result[0]["text"]})
 
-            # 2. Write the transcription to a text file
-            transcription_text = asr_result[0]["text"]
-            with open(final_txt_path, "w", encoding="utf-8") as f:
-                f.write(transcription_text)
-
-            logger.info(f"  - Exported '{final_wav_path}' and '{final_txt_path}'")
+            logger.info(f"  - Exported '{final_wav_path}'")
         
         except Exception as e:
             logger.error(f"Failed to export {vocal_path}: {e}", exc_info=True)
             failures.append(FailedFile(filepath=vocal_path, reason=f"Export failed: {e}"))
 
     return StepResult(successful_outputs=exported_files, failures=failures)
+
+
+def _create_metadata_csv(export_results: List[Dict], output_dir: str, speaker_name: str):
+    """Creates the final metadata.csv file for the dataset."""
+    logger.info("\n--- Creating metadata.csv ---")
+    csv_header = "audio_file|text|speaker_name"
+    csv_path = os.path.join(output_dir, "metadata.csv")
+
+    try:
+        with open(csv_path, "w", encoding="utf-8") as f:
+            f.write(f"{csv_header}\n")
+            for result in export_results:
+                relative_path = f"wavs/{os.path.basename(result['filepath'])}"
+                text = result["text"]
+                f.write(f"{relative_path}|{text}|{speaker_name}\n")
+        
+        logger.info(f"Successfully created metadata file at: {csv_path}")
+    except Exception as e:
+        logger.error(f"Failed to create metadata.csv: {e}", exc_info=True)
 
 
 def _print_summary_report(all_failures: List[FailedFile], final_success_count: int):
@@ -459,6 +472,7 @@ def run_pipeline(
     min_duration: float = 2.5,
     max_duration: float = 11.5,
     separator_model_file_name: str = "melband_roformer_big_beta4.ckpt",
+    speaker_name: str = "coqui",
 ):
     """
     Runs the full audio processing pipeline in batch stages.
@@ -469,6 +483,8 @@ def run_pipeline(
 
     # -- Setup --
     dirs = _setup_directories(temp_dir, output_dir)
+    wavs_output_dir = os.path.join(output_dir, "wavs")
+    os.makedirs(wavs_output_dir, exist_ok=True)
 
     # -- Step 1: VAD Segmentation --
     vad_result = _run_vad_segmentation(
@@ -514,8 +530,12 @@ def run_pipeline(
         return
 
     # -- Step 6: Batch Export --
-    export_result = _batch_export(transcribe_result.successful_outputs, output_dir)
+    export_result = _batch_export(transcribe_result.successful_outputs, wavs_output_dir)
     all_failures.extend(export_result.failures)
+
+    # -- Final Step: Create Metadata CSV --
+    if export_result.successful_outputs:
+        _create_metadata_csv(export_result.successful_outputs, output_dir, speaker_name)
 
     logger.info("\n--- Pipeline Finished ---")
     _print_summary_report(all_failures, len(export_result.successful_outputs))
@@ -524,4 +544,4 @@ def run_pipeline(
 
 if __name__ == "__main__":
     input_audio = r"E:\tts\xtts\Knut\_raw_data\0\Knut_Im_back.mp3"
-    run_pipeline(input_audio)
+    run_pipeline(input_audio, speaker_name="knut")
