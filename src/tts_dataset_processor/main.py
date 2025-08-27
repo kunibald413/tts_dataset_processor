@@ -399,43 +399,35 @@ def _batch_transcribe(asr_path_map: Dict[str, str], temp_dir: str) -> StepResult
 
 
 def _batch_export(transcriptions: Dict[str, List[Dict]], output_dir: str) -> StepResult:
-    """Runs final export for a dictionary of transcribed audio files."""
+    """
+    Exports the final audio files and their transcriptions.
+    This step simply copies the high-quality vocal files to the output directory
+    and creates a corresponding .txt file for each with the transcription.
+    """
     logger.info("\n--- [Step 6/6] Exporting all final segments ---")
     exported_files = []
     failures = []
     for vocal_path, asr_result in transcriptions.items():
         try:
-            if not asr_result:
-                raise ValueError("No transcription result available.")
+            if not asr_result or "text" not in asr_result[0]:
+                raise ValueError("No transcription text available.")
 
-            vocals_audio_data = load_audio_data(vocal_path)
-            
-            # Convert the normalized float waveform back to int16 for saving
-            waveform_int16 = (vocals_audio_data.waveform * 32767).astype(np.int16)
-            
+            # Determine the final name and paths
             base_filename = os.path.basename(vocal_path).replace("_(vocals)", "")
-            final_filename_prefix = os.path.splitext(base_filename)[0]
+            final_wav_path = os.path.join(output_dir, base_filename)
+            final_txt_path = os.path.splitext(final_wav_path)[0] + ".txt"
             
-            # Since we know there is only one segment in the asr_result list, we can get the fpath
-            # from the return value of export_to_wav. We need to create a temporary AudioData
-            # object with the int16 waveform to pass to the export function.
-            export_data = AudioData(
-                waveform=waveform_int16,
-                name=vocals_audio_data.name,
-                sample_rate=vocals_audio_data.sample_rate
-            )
+            # 1. Copy the final audio file
+            shutil.copy2(vocal_path, final_wav_path)
+            exported_files.append(final_wav_path)
 
-            exported_segments = export_to_wav(
-                audio_data=export_data,
-                asr_result=asr_result,
-                folder_path=output_dir,
-                file_name_prefix=final_filename_prefix,
-            )
-            
-            for segment in exported_segments:
-                exported_files.append(str(segment['fpath']))
-            
-            logger.info(f"  - Final segment exported to '{output_dir}' with prefix '{final_filename_prefix}'.")
+            # 2. Write the transcription to a text file
+            transcription_text = asr_result[0]["text"]
+            with open(final_txt_path, "w", encoding="utf-8") as f:
+                f.write(transcription_text)
+
+            logger.info(f"  - Exported '{final_wav_path}' and '{final_txt_path}'")
+        
         except Exception as e:
             logger.error(f"Failed to export {vocal_path}: {e}", exc_info=True)
             failures.append(FailedFile(filepath=vocal_path, reason=f"Export failed: {e}"))
