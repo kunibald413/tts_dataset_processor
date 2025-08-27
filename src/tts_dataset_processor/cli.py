@@ -7,14 +7,14 @@ def main():
     Command-line interface for the TTS Dataset Processor.
     """
     parser = argparse.ArgumentParser(
-        description="Process a raw audio file into a TTS dataset."
+        description="Process a raw audio file (or a directory of them) into a TTS dataset."
     )
     parser.add_argument(
         "-i",
         "--input",
         type=str,
         required=True,
-        help="Path to the input audio file to process.",
+        help="Path to the input audio file or directory to process.",
     )
     parser.add_argument(
         "-o",
@@ -25,7 +25,7 @@ def main():
     )
     args = parser.parse_args()
 
-    run_pipeline(input_file=args.input, output_dir=args.output)
+    run_pipeline(input_path=args.input, output_dir=args.output)
 
 
 if __name__ == "__main__":

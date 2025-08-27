@@ -217,6 +217,25 @@ def _group_into_chunks(data: Iterable[Any], chunk_size: int) -> List[List[Any]]:
     return chunks
 
 
+def _get_audio_files_from_input(input_path: str) -> List[str]:
+    """Finds all audio files from a given file or directory path."""
+    if not os.path.exists(input_path):
+        logger.error(f"Input path does not exist: {input_path}")
+        return []
+
+    if os.path.isfile(input_path):
+        return [input_path]
+
+    if os.path.isdir(input_path):
+        audio_files = []
+        for ext in ("*.wav", "*.mp3", "*.flac"):
+            audio_files.extend(Path(input_path).rglob(ext))
+        logger.info(f"Found {len(audio_files)} audio files in {input_path}.")
+        return [str(p) for p in audio_files]
+    
+    return []
+
+
 # --- Batch Processing Functions ---
 
 
@@ -512,7 +531,7 @@ def _print_summary_report(all_failures: List[FailedFile], final_success_count: i
 
 
 def run_pipeline(
-    input_file: str,
+    input_path: str,
     temp_dir: str = "tmp",
     output_dir: str = "output",
     min_duration: float = 2.3,
@@ -524,26 +543,36 @@ def run_pipeline(
     Runs the full audio processing pipeline in batch stages.
     1. VAD Segmentation -> 2. Standardization -> 3. Separation -> 4. ASR -> 5. Export
     """
-    logger.info(f"--- Starting Pipeline for: {input_file} ---")
+    logger.info(f"--- Starting Pipeline for Input: {input_path} ---")
     all_failures = []
 
     # -- Setup --
+    audio_files = _get_audio_files_from_input(input_path)
+    if not audio_files:
+        logger.error("No audio files found to process. Halting pipeline.")
+        return
+        
     dirs = _setup_directories(temp_dir, output_dir)
     wavs_output_dir = os.path.join(output_dir, "wavs")
     os.makedirs(wavs_output_dir, exist_ok=True)
 
-    # -- Step 1: VAD Segmentation --
-    vad_result = _run_vad_segmentation(
-        input_file, dirs["vad"], min_duration, max_duration
-    )
-    all_failures.extend(vad_result.failures)
-    if not vad_result.successful_outputs:
-        logger.error("No segments produced by VAD. Halting pipeline.")
+    # -- Step 1: VAD Segmentation (run for each input file) --
+    all_vad_segment_paths = []
+    for audio_file in audio_files:
+        logger.info(f"\n--- Running VAD on source file: {os.path.basename(audio_file)} ---")
+        vad_result = _run_vad_segmentation(
+            audio_file, dirs["vad"], min_duration, max_duration
+        )
+        all_failures.extend(vad_result.failures)
+        all_vad_segment_paths.extend(vad_result.successful_outputs)
+
+    if not all_vad_segment_paths:
+        logger.error("No segments produced by VAD across all files. Halting pipeline.")
         _print_summary_report(all_failures, 0)
         return
 
     # -- Step 2: Batch Standardization --
-    standardize_result = _batch_standardize(vad_result.successful_outputs, dirs["standardized"])
+    standardize_result = _batch_standardize(all_vad_segment_paths, dirs["standardized"])
     all_failures.extend(standardize_result.failures)
     if not standardize_result.successful_outputs:
         logger.error("No segments were successfully standardized. Halting pipeline.")
@@ -590,5 +619,8 @@ def run_pipeline(
 # --- Main Entry Point ---
 
 if __name__ == "__main__":
-    input_audio = r"E:\tts\xtts\Knut\_raw_data\0\Knut_Im_back.mp3"
-    run_pipeline(input_audio, speaker_name="knut")
+    # Example for a single file:
+    # input_audio = r"E:\tts\xtts\Knut\_raw_data\0\Knut_Im_back.mp3"
+    # Example for a directory:
+    input_audio = r"E:\tts\xtts\Knut\_raw_data"
+    run_pipeline(input_path=input_audio, speaker_name="knut")
