@@ -1,9 +1,10 @@
 # TTS Dataset Processor
 
+Process audio files into TTS-ready datasets or transcribe files standalone.
+
 ## Installation & Usage
 
-> **Prerequisites:** This tool requires `ffmpeg` and `libc++1`. On Debian/Ubuntu, you can install them with:
->
+> **Prerequisites:** Requires `ffmpeg` and `libc++1`:
 > ```bash
 > apt update && apt install ffmpeg libc++1 -y
 > ```
@@ -14,24 +15,14 @@
     ```bash
     poetry install
     ```
-2.  **Run:**
+2.  **Run Pipeline:**
     ```bash
-    poetry run python -m tts_dataset_processor.cli -i path/to/your/audio.mp3
+    poetry run python -m tts_dataset_processor pipeline -i path/to/audio.mp3
     ```
-
-4. update deps if changed:
+3.  **Transcribe Only:**
     ```bash
-    poetry update
+    poetry run python -m tts_dataset_processor transcribe -i path/to/audio
     ```
-
-
-**Note:** To install Poetry on Debian/Ubuntu, you can use `pipx`:
-```bash
-apt update
-apt install pipx -y
-pipx ensurepath
-pipx install poetry
-```
 
 ### Without Poetry
 
@@ -40,8 +31,16 @@ pipx install poetry
     pip install .
     ```
 2.  **Run:**
-    Make sure your Python environment is activated, then run the script as a module:
     ```bash
-    python -m tts_dataset_processor.cli -i path/to/your/audio.mp3
+    # Full TTS dataset pipeline
+    python -m tts_dataset_processor pipeline -i audio.mp3 -o output
+
+    # Transcribe files only (creates CSV + JSON)
+    python -m tts_dataset_processor transcribe -i audio_folder
     ```
+
+## Commands
+
+- `pipeline` - Full TTS dataset processing (VAD, separation, transcription, export)
+- `transcribe` - Standalone transcription with metadata export
 
