@@ -21,7 +21,7 @@ Process audio files into TTS-ready datasets or transcribe files standalone.
     ```
 3.  **Transcribe Only:**
     ```bash
-    poetry run python -m tts_dataset_processor transcribe -i path/to/audio
+    poetry run python -m tts_dataset_processor transcribe -i /ref_audios/reference_audios
     ```
 
 **Note:** To install Poetry on Debian/Ubuntu:
