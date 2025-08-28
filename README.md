@@ -24,6 +24,14 @@ Process audio files into TTS-ready datasets or transcribe files standalone.
     poetry run python -m tts_dataset_processor transcribe -i path/to/audio
     ```
 
+**Note:** To install Poetry on Debian/Ubuntu:
+```bash
+apt update
+apt install pipx -y
+pipx ensurepath
+pipx install poetry
+```
+
 ### Without Poetry
 
 1.  **Install:**
