@@ -69,14 +69,9 @@ def transcribe_files(
                 basename = os.path.basename(audio_file)
                 temp_file = os.path.join(temp_dir, basename)
                 
-                # Convert to 16kHz mono WAV for ASR if needed
-                if not audio_file.lower().endswith('.wav'):
-                    temp_file = os.path.splitext(temp_file)[0] + '.wav'
-                    convert_to_wav(audio_file, temp_file)
-                else:
-                    # Just copy if already WAV
-                    import shutil
-                    shutil.copy2(audio_file, temp_file)
+                # Always convert to 16kHz mono WAV for ASR (regardless of input format)
+                temp_file = os.path.splitext(temp_file)[0] + '.wav'
+                convert_to_wav(audio_file, temp_file)
                 
                 asr_file_map[temp_file] = audio_file
                 
