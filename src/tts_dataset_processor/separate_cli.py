@@ -153,13 +153,13 @@ def separate_audio_chunks(
                     logger.error(f"Vocals file not found at {vocals_path}")
                     continue
                 
-                # Copy to final output
-                output_name = f"{Path(file_path).stem}_vocals.wav"
-                final_vocals_path = os.path.join(output_dir, output_name)
+                # Copy to final output with exact original filename
+                original_filename = os.path.basename(file_path)
+                final_vocals_path = os.path.join(output_dir, original_filename)
                 shutil.copy2(vocals_path, final_vocals_path)
                 
                 results.append((file_path, final_vocals_path))
-                logger.info(f"    - Saved: {output_name}")
+                logger.info(f"    - Saved: {original_filename}")
             
             else:
                 # Multiple files - concatenate, separate, then split
@@ -202,12 +202,13 @@ def separate_audio_chunks(
                     end_ms = start_ms + duration_ms
                     split_vocal = separated_vocals_audio[start_ms:end_ms]
                     
-                    output_name = f"{file_stem}_vocals.wav"
-                    final_vocals_path = os.path.join(output_dir, output_name)
+                    # Use exact original filename
+                    original_filename = os.path.basename(original_file)
+                    final_vocals_path = os.path.join(output_dir, original_filename)
                     split_vocal.export(final_vocals_path, format="wav")
                     
                     results.append((original_file, final_vocals_path))
-                    logger.info(f"    - Split and saved: {output_name}")
+                    logger.info(f"    - Split and saved: {original_filename}")
                     
                     start_ms = end_ms
         
