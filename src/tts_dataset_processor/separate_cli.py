@@ -141,6 +141,14 @@ def separate_audio_chunks(
                 file_path = chunk[0]
                 logger.info(f"  - Separating single file: {os.path.basename(file_path)}")
                 
+                # Get original format info
+                original_audio = AudioSegment.from_file(file_path)
+                orig_format = {
+                    'channels': original_audio.channels,
+                    'frame_rate': original_audio.frame_rate,
+                    'sample_width': original_audio.sample_width
+                }
+                
                 output_filenames = separator.separate([file_path])
                 vocals_filename = next((f for f in output_filenames if "(vocals)" in f), None)
                 
@@ -153,10 +161,29 @@ def separate_audio_chunks(
                     logger.error(f"Vocals file not found at {vocals_path}")
                     continue
                 
-                # Copy to final output with exact original filename
+                # Load separated vocals and restore original format
+                vocals_audio = AudioSegment.from_file(vocals_path)
+                vocals_audio = vocals_audio.set_channels(orig_format['channels'])
+                vocals_audio = vocals_audio.set_frame_rate(orig_format['frame_rate'])
+                vocals_audio = vocals_audio.set_sample_width(orig_format['sample_width'])
+                
+                # Export with original filename and format
                 original_filename = os.path.basename(file_path)
                 final_vocals_path = os.path.join(output_dir, original_filename)
-                shutil.copy2(vocals_path, final_vocals_path)
+                
+                # Export with original file extension to preserve format
+                original_ext = Path(file_path).suffix.lower()
+                export_format = "wav"  # Default fallback
+                if original_ext in ['.mp3']:
+                    export_format = "mp3"
+                elif original_ext in ['.flac']:
+                    export_format = "flac"
+                elif original_ext in ['.m4a']:
+                    export_format = "mp4"
+                elif original_ext in ['.ogg']:
+                    export_format = "ogg"
+                
+                vocals_audio.export(final_vocals_path, format=export_format)
                 
                 results.append((file_path, final_vocals_path))
                 logger.info(f"    - Saved: {original_filename}")
@@ -169,12 +196,19 @@ def separate_audio_chunks(
                 combined_audio = AudioSegment.empty()
                 durations_ms = []
                 file_stems = []
+                original_formats = []  # Store original format info
                 
                 for file_path in chunk:
                     audio = AudioSegment.from_file(file_path)
                     combined_audio += audio
                     durations_ms.append(len(audio))
                     file_stems.append(Path(file_path).stem)
+                    # Store original format info
+                    original_formats.append({
+                        'channels': audio.channels,
+                        'frame_rate': audio.frame_rate,
+                        'sample_width': audio.sample_width
+                    })
                 
                 # Save concatenated file
                 concat_filename = f"chunk_{i:03d}_concatenated.wav"
@@ -198,14 +232,32 @@ def separate_audio_chunks(
                 separated_vocals_audio = AudioSegment.from_file(vocals_path)
                 start_ms = 0
                 
-                for j, (duration_ms, file_stem, original_file) in enumerate(zip(durations_ms, file_stems, chunk)):
+                for j, (duration_ms, file_stem, original_file, orig_format) in enumerate(zip(durations_ms, file_stems, chunk, original_formats)):
                     end_ms = start_ms + duration_ms
                     split_vocal = separated_vocals_audio[start_ms:end_ms]
                     
-                    # Use exact original filename
+                    # Restore original format (channels, sample rate, bit depth)
+                    split_vocal = split_vocal.set_channels(orig_format['channels'])
+                    split_vocal = split_vocal.set_frame_rate(orig_format['frame_rate'])
+                    split_vocal = split_vocal.set_sample_width(orig_format['sample_width'])
+                    
+                    # Use exact original filename and preserve original format
                     original_filename = os.path.basename(original_file)
                     final_vocals_path = os.path.join(output_dir, original_filename)
-                    split_vocal.export(final_vocals_path, format="wav")
+                    
+                    # Export with original file extension to preserve format
+                    original_ext = Path(original_file).suffix.lower()
+                    export_format = "wav"  # Default fallback
+                    if original_ext in ['.mp3']:
+                        export_format = "mp3"
+                    elif original_ext in ['.flac']:
+                        export_format = "flac"
+                    elif original_ext in ['.m4a']:
+                        export_format = "mp4"
+                    elif original_ext in ['.ogg']:
+                        export_format = "ogg"
+                    
+                    split_vocal.export(final_vocals_path, format=export_format)
                     
                     results.append((original_file, final_vocals_path))
                     logger.info(f"    - Split and saved: {original_filename}")
