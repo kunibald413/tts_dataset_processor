@@ -51,4 +51,24 @@ pipx install poetry
 
 - `pipeline` - Full TTS dataset processing (VAD, separation, transcription, export)
 - `transcribe` - Standalone transcription with metadata export
+- `separate` - Vocal separation only with intelligent chunking
+
+### Vocal Separation Only
+
+For when you just want to separate vocals from audio files:
+
+**With Poetry:**
+```bash
+poetry run python -m tts_dataset_processor.separate_cli -i /path/to/audio/folder -o /path/to/vocals/output
+```
+
+**Without Poetry:**
+```bash
+python -m tts_dataset_processor.separate_cli -i /path/to/audio/folder -o /path/to/vocals/output
+```
+
+**Options:**
+- `--model` or `-m`: Specify separation model (default: melband_roformer_big_beta4.ckpt)
+- `--min-duration`: Minimum duration threshold for chunking (default: 10.0 seconds)  
+- `--chunk-size`: Maximum files per chunk (default: 5)
 
