@@ -36,7 +36,7 @@ pipx install poetry
 
 1.  **Install:**
     ```bash
-    pip install .
+    pip install -e .
     ```
 2.  **Run:**
     ```bash
