@@ -5,9 +5,9 @@ Process audio files into TTS-ready datasets or transcribe files standalone.
 ## Installation & Usage
 
 > **Prerequisites:** Requires `ffmpeg` and `libc++1`:
-> ```bash
-> apt update && apt install ffmpeg libc++1 -y
-> ```
+```bash
+apt update && apt install ffmpeg libc++1 -y
+```
 
 ### With Poetry (Recommended)
 
