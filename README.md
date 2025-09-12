@@ -9,6 +9,10 @@ Process audio files into TTS-ready datasets or transcribe files standalone.
 apt update && apt install ffmpeg libc++1 -y
 ```
 
+tested environments:
+
+`runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04`
+
 ### With Poetry (Recommended)
 
 1.  **Install:**
